@@ -171,4 +171,7 @@ How the page learns each step's progress (polling a status webhook by run ID, or
   - a lead created just before the period boundary (timezone handled consistently)
   - an unusually large order (outlier flagged, not hidden)
   - Meta rejecting an event (counted and shown as a warning, run continues)
+- The 4 data checks in §6.3 step 6, as plain code.
+- AI sees aggregates and warnings only, never personal or patient data. Its answer is validated (format, and every number it mentions must match the real data); on failure retry once, then fall back to a template summary.
+- **Strict JSON schema for the AI's answer** (Ibrahim's addition): the summary is requested as structured output against a fixed JSON schema (e.g. per client: headline, summary, warnings_explained[], next_steps[]), using the provider's structured-output / JSON-schema mode or n8n's structured output parser, and validated against the schema before use. The chosen AI model (§10) must support this.
 - Clean-up of demo leads (starting value: older than 7 days) and run limits (starting values: one at a time, 1-minute gap, 50 runs a day); anyone hitting a limit sees a clear message and the latest report.
