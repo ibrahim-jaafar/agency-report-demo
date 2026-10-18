@@ -1,6 +1,6 @@
 # Agency Report Demo — design
 
-Date: 2026-10-18 · Owner: Ibrahim Jaafar · Status: draft for approval
+Date: 2026-10-18 · Owner: Ibrahim Jaafar · Status: approved by Ibrahim 2026-10-18
 
 ## 1. Why this exists
 
