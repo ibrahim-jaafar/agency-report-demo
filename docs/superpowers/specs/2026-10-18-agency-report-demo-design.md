@@ -156,3 +156,19 @@ How the page learns each step's progress (polling a status webhook by run ID, or
 
 - AI model for the summary (should have a free tier).
 - Video walkthrough: captions only or AI voice, or none — no face, no voice of his own.
+- If abuse or limits become a problem: switch the public button to "Request a demo" (recruiter asks, Ibrahim enables a run).
+
+## 11. Approved by Ibrahim (review of §8, 2026-10-18)
+
+- Demo page on the portfolio site; n8n runs on Hugging Face behind it. Not every project needs a live demo — only this one is built to be public.
+- Deliberately flawed demo leads (missing source, duplicates, GHL/Meta mismatch), random per run so some runs are all green and some show warnings; the page says the demo data contains deliberate mistakes. **Plus edge cases** (Ibrahim's addition), each of which the workflow and page must handle without breaking or showing nonsense:
+  - a client with zero leads or zero conversions in the period (no divide-by-zero: show "no leads yet", not ∞ or NaN)
+  - leads with no ad spend behind them (organic), so ROAS / cost per lead must not be skewed or undefined
+  - a cancelled booking or refunded order
+  - the same duplicate written differently (phone with spaces or +961 vs 0, email in capitals) — duplicate check normalises first
+  - the same person as a lead at both clients — not a duplicate
+  - names with accents, Arabic script or emoji (Meta hashing: trim + lowercase, UTF-8)
+  - a lead created just before the period boundary (timezone handled consistently)
+  - an unusually large order (outlier flagged, not hidden)
+  - Meta rejecting an event (counted and shown as a warning, run continues)
+- Clean-up of demo leads (starting value: older than 7 days) and run limits (starting values: one at a time, 1-minute gap, 50 runs a day); anyone hitting a limit sees a clear message and the latest report.
