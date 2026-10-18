@@ -171,6 +171,12 @@ How the page learns each step's progress (polling a status webhook by run ID, or
   - a lead created just before the period boundary (timezone handled consistently)
   - an unusually large order (outlier flagged, not hidden)
   - Meta rejecting an event (counted and shown as a warning, run continues)
+- **Test scenario panel** (Ibrahim's idea), above the Run button. Replaces "random flaws every run":
+  - **Random** ("Surprise me") — kept as a choice and the default, so a hurried visitor just clicks Run.
+  - **Clean data** — everything correct; all lights should be green.
+  - **Choose problems** — tick any of: missing source, duplicate leads, Meta/GHL mismatch, totals that don't add up, edge cases (zero leads, cancelled booking, large order, Arabic/emoji names), AI gives a broken answer (forces the template fallback to be visible).
+  - After the run, each warning notes which chosen problem it caught; anything not caught is shown too, so the test is honest.
+  - The webhook accepts only these listed options (whitelist) and ignores anything else; run limits still apply.
 - The 4 data checks in §6.3 step 6, as plain code.
 - AI sees aggregates and warnings only, never personal or patient data. Its answer is validated (format, and every number it mentions must match the real data); on failure retry once, then fall back to a template summary.
 - **Strict JSON schema for the AI's answer** (Ibrahim's addition): the summary is requested as structured output against a fixed JSON schema (e.g. per client: headline, summary, warnings_explained[], next_steps[]), using the provider's structured-output / JSON-schema mode or n8n's structured output parser, and validated against the schema before use. The chosen AI model (§10) must support this.
