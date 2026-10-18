@@ -52,6 +52,9 @@ This project closes gaps 1–5 with one real, working thing a recruiter can run 
 - **Troubleshooting guide:** yes.
 - **Video:** later, and only if it needs neither his face nor his voice.
 - **AI model for the summary:** decide later.
+- **Meta:** use his own Facebook account to create the Meta Business account and dataset, as long as it stays free (test events only).
+- **Repo:** private while building; Ibrahim makes it public when finished. No keys or passwords ever committed (they live in n8n credentials / Space secrets), so making it public later needs no clean-up.
+- **Accounts:** Ibrahim creates every account himself (Hugging Face, Supabase, GHL developer, Meta); Claude guides each step.
 
 ## 6. How it works
 
