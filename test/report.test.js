@@ -54,3 +54,8 @@ test('injected problems: caught or missed, ai_broken from the AI source', () => 
   assert.deepEqual(r.injected, [{ problem: 'duplicates', caught: true }, { problem: 'bad_totals', caught: false }, { problem: 'ai_broken', caught: true }]);
   assert.equal(base({ problems: ['ai_broken'] }).injected[0].caught, false);
 });
+
+test('meta_mismatch with nothing to skip is not applicable, not missed', () => {
+  assert.deepEqual(base({ problems: ['meta_mismatch'], metaSkipped: 0 }).injected, [{ problem: 'meta_mismatch', caught: null }]);
+  assert.deepEqual(base({ problems: ['meta_mismatch'], metaSkipped: 2 }).injected, [{ problem: 'meta_mismatch', caught: false }]);
+});
