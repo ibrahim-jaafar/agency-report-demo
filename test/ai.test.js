@@ -106,3 +106,13 @@ test('template says "no leads yet" instead of printing nothing-numbers', () => {
   assert.match(t.clients[0].headline + t.clients[0].summary, /no leads yet/i);
   assert.ok(!/NaN|Infinity|null|undefined/.test(JSON.stringify(t)));
 });
+
+test('template uses singular words for one', () => {
+  const one = { clients: [
+    { client: 'clinic', name: 'C', kpis: { spend: 50, leads: 1, paidLeads: 1, costPerLead: 50, cancelled: 1, bookings: 1, costPerBooking: 50, bookingRate: 1 }, changes: null, warnings: [] },
+    { client: 'store', name: 'S', kpis: { spend: 50, leads: 1, paidLeads: 1, costPerLead: 50, cancelled: 1, orders: 1, revenue: 82, roas: 1.64, costPerOrder: 50, avgOrderValue: 82 }, changes: null, warnings: [] }] };
+  const t = templateSummary(one);
+  const text = JSON.stringify(t);
+  for (const bad of ['1 orders', '1 leads', '1 booked consultations', '1 cancelled bookings', '1 cancelled orders']) assert.ok(!text.includes(bad), bad);
+  assert.match(t.clients[1].headline, /from 1 order$/);
+});

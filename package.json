@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "build": "node scripts/build-workflows.mjs"
+    "build": "node scripts/build-workflows.mjs",
+    "site": "node -e \"require('fs').cpSync('lib','../ibrahim-jaafar.github.io/agency-demo/lib',{recursive:true})\""
   }
 }
