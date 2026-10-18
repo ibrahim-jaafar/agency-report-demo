@@ -154,7 +154,7 @@ How the page learns each step's progress (polling a status webhook by run ID, or
 
 ## 10. Open, decide later (Ibrahim)
 
-- AI model for the summary (should have a free tier).
+- ~~AI model for the summary~~ → **decided 2026-10-18: Google Gemini** (free tier, no card, JSON-schema output via its OpenAI-compatible endpoint). OpenRouter can be added later as a backup before the template fallback.
 - Video walkthrough: captions only or AI voice, or none — no face, no voice of his own.
 - If abuse or limits become a problem: switch the public button to "Request a demo" (recruiter asks, Ibrahim enables a run).
 
