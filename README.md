@@ -2,10 +2,18 @@
 
 A weekly marketing report built with n8n: leads from GoHighLevel, conversions sent to Meta, data checks in plain code, and a short AI summary that can't change a number. Live page: https://ibrahim-jaafar.github.io/agency-demo/
 
+## What is live and what is made up
+
+- **Live:** the n8n workflow (Render), the run history (Supabase), the leads and deals saved in a GoHighLevel sandbox, the conversions sent to Meta's Conversions API (a demo dataset with no ads; Meta treats them as normal events unless its Test Events tab is open), the data checks and the Gemini summary.
+- **Made up:** the two clients, their leads, the ad spend (simulated per campaign) and the mistakes a visitor chooses.
+- **Limits:** one run at a time, one a minute, 50 a day. Gemini's free tier allows 20 requests a day per model; each run tries Flash and Flash-Lite at once, so about 20 runs a day get an AI summary and later runs use the template.
+- When something looks wrong, see [docs/troubleshooting.md](docs/troubleshooting.md).
+
 ## Code
 
 - `lib/`: the logic (scenario, leads, spend, KPIs, checks, Meta events, AI input/validation, report). No dependencies.
 - `npm test`: runs the tests (`node --test`).
+- `node --test agency-demo/app.test.mjs` (in the portfolio repo): tests the demo page helpers.
 - `npm run site`: copies `lib/` into the portfolio's `agency-demo/lib/`.
 
 ## Hosting setup
@@ -42,6 +50,6 @@ Keys (GoHighLevel, Meta, Gemini) are stored only in n8n credentials.
 | Find demo contacts older than 7 days | `POST /contacts/search` (tag filter + `dateAdded` range, oldest first) |
 | Delete them | `DELETE /contacts/<id>` (GoHighLevel removes their deals too) |
 | Conversions | `POST https://graph.facebook.com/v23.0/<dataset>/events` with `test_event_code` |
-| AI summary | `POST https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, model `gemini-flash-latest`, strict JSON schema |
+| AI summary | `POST https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, models `gemini-flash-latest` and `gemini-flash-lite-latest` (one attempt each, in parallel), strict JSON schema |
 
 GoHighLevel's search lags a few seconds behind new contacts, so a run builds its report from the records GoHighLevel returns when they're saved, not from a search.
