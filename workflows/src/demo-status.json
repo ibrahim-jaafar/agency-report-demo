@@ -1,6 +1,64 @@
 {
   "name": "demo-status",
-  "nodes": [],
-  "connections": {},
-  "settings": {}
+  "nodes": [
+    {
+      "id": "2552101d-fe8b-4ef5-82a4-1a45aab53725",
+      "name": "Status webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "demo/status",
+        "responseMode": "lastNode",
+        "options": {
+          "allowedOrigins": "https://ibrahim-jaafar.github.io"
+        }
+      },
+      "webhookId": "ba3f0fd1-a378-48fc-8f66-02a013c148bf"
+    },
+    {
+      "id": "fad914fd-f5e2-4d51-b03e-3c8fa87666bb",
+      "name": "Find run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id as \"runId\", status, steps, report from (\n  select 0 as pick, id, status, steps, report from demo_runs where id::text = lower($1)\n  union all\n  (select 1, id, status, steps, report from demo_runs where status in ('done','partial') order by created_at desc limit 1)\n) r order by pick limit 1",
+        "options": {
+          "queryReplacement": "={{ [String($json.query.run ?? '').slice(0, 36)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      },
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Status webhook": {
+      "main": [
+        [
+          {
+            "node": "Find run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
 }

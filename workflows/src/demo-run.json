@@ -1,6 +1,303 @@
 {
   "name": "demo-run",
-  "nodes": [],
-  "connections": {},
-  "settings": {}
+  "nodes": [
+    {
+      "id": "0855843b-35de-4a53-84c6-9ee72389cbeb",
+      "name": "Start webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo/start",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://ibrahim-jaafar.github.io"
+        }
+      },
+      "webhookId": "0c78b31c-1148-4972-b86f-f63c25de2f04"
+    },
+    {
+      "id": "24664bd1-b63c-4584-9ebf-3072699547d0",
+      "name": "Recent runs",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select coalesce(json_agg(json_build_object('id', id, 'status', status, 'created_at', created_at)), '[]'::json) as runs\nfrom demo_runs where created_at >= now() - interval '1 day'",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    },
+    {
+      "id": "9310b994-8222-4755-bf6f-718a1cdf27d0",
+      "name": "Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nlet body = $('Start webhook').first().json.body;\nif (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = null; } }\nconst scenario = parseScenario(body);\nconst limit = checkLimits($input.first().json.runs || [], new Date());\nconst steps = ['ghl', 'spend', 'meta', 'checks', 'ai'].map(key => ({ key, status: 'pending' }));\nreturn [{ json: { scenario, limit, steps } }];"
+      }
+    },
+    {
+      "id": "f5cb742f-490f-436f-95a5-e2648c5dd451",
+      "name": "Allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "84dd3241-5364-4c82-a0f6-fac1ef309e3c",
+              "leftValue": "={{ $json.limit.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5833ceb0-bc2f-4e08-91c5-5210d670629e",
+      "name": "Create run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into demo_runs (status, scenario, steps) values ('running', $1::jsonb, $2::jsonb) returning id",
+        "options": {
+          "queryReplacement": "={{ [JSON.stringify($json.scenario), JSON.stringify($json.steps)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    },
+    {
+      "id": "163f54c3-1b97-439e-aed9-527663f0b77f",
+      "name": "Respond started",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        -120
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ runId: $json.id, joined: false }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "dbc04850-4c76-4377-9a0e-8a80334adb5a",
+      "name": "Save result",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1320,
+        -120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update demo_runs set status = $2, report = $3::jsonb where id = $1::uuid",
+        "options": {
+          "queryReplacement": "={{ [$('Create run').first().json.id, 'done', 'null'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    },
+    {
+      "id": "7b89a036-b953-40db-b944-4eb1f4f1017b",
+      "name": "Latest report",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        120
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select (select report from demo_runs where status in ('done','partial') order by created_at desc limit 1) as latest",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    },
+    {
+      "id": "0be532f9-1ac4-4666-96b9-68b809c0c4cc",
+      "name": "Refusal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        120
+      ],
+      "parameters": {
+        "jsCode": "const { limit } = $('Decide').first().json;\nif (limit.reason === 'running') return [{ json: { code: 200, body: { runId: limit.runId, joined: true } } }];\nreturn [{ json: { code: 429, body: { reason: limit.reason, retryAfterSec: limit.retryAfterSec, latest: $input.first().json.latest ?? null } } }];"
+      }
+    },
+    {
+      "id": "3345961b-41a6-47f1-92f1-ecef58d9ba23",
+      "name": "Respond refused",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        120
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.code }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Start webhook": {
+      "main": [
+        [
+          {
+            "node": "Recent runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recent runs": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Allowed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Allowed?": {
+      "main": [
+        [
+          {
+            "node": "Create run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Latest report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create run": {
+      "main": [
+        [
+          {
+            "node": "Respond started",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond started": {
+      "main": [
+        [
+          {
+            "node": "Save result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest report": {
+      "main": [
+        [
+          {
+            "node": "Refusal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Refusal": {
+      "main": [
+        [
+          {
+            "node": "Respond refused",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
 }
