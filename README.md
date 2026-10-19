@@ -7,6 +7,8 @@ A weekly marketing report built with n8n: leads from GoHighLevel, conversions se
 - **Live:** the n8n workflow (Render), the run history (Supabase), the leads and deals saved in a GoHighLevel sandbox, the conversions sent to Meta's Conversions API (a demo dataset with no ads; Meta treats them as normal events unless its Test Events tab is open), the data checks and the Gemini summary.
 - **Made up:** the two clients, their leads, the ad spend (simulated per campaign) and the mistakes a visitor chooses.
 - **Limits:** one run at a time, one a minute, 50 a day. Gemini's free tier allows 20 requests a day per model; each run tries Flash and Flash-Lite at once, so about 20 runs a day get an AI summary and later runs use the template.
+- **GoHighLevel limit:** our sandbox token allows 25 requests per 10 seconds per sub-account (its `X-RateLimit-*` headers say so; the docs say 100) and 10,000 a day. GoHighLevel has no bulk create for contacts or deals, so a run sends one request per record, 2 a second. Anything refused (429) is sent once more after a 10-second pause.
+- **Cleanup:** after the report is saved, each run deletes up to 25 demo contacts older than 7 days per sub-account (their deals go with them). It runs there and not on a schedule because the free server sleeps.
 - When something looks wrong, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Code
@@ -33,6 +35,7 @@ Keys (GoHighLevel, Meta, Gemini) are stored only in n8n credentials.
 - Edit `scripts/make-templates.mjs` (not the JSON), then `node scripts/make-templates.mjs` → `workflows/src/`.
 - `node scripts/deploy.mjs` builds `dist/` (tested `lib/` pasted into the Code nodes) and uploads/publishes the 3 workflows. It needs `N8N_API_KEY` plus the IDs in `.env` (credential IDs, GHL location/pipeline/stage IDs, Meta dataset, test code).
 - To test the demo page from your own machine, build with `DEMO_EXTRA_ORIGIN=http://localhost:8765 node scripts/make-templates.mjs`, deploy, test, then build and deploy again without it.
+- Test-only switches for the same build step: `GHL_BATCH=25` (no pacing), `GHL_TEST_FLOOD=30` (extra lookups that push a run over the GoHighLevel limit, to test the retry) and `CLEANUP_HOURS=1` (clean up contacts older than an hour). Build and deploy again without them afterwards.
 - n8n credentials (all **Header Auth**, `Authorization: Bearer <token>`, except the database): `Supabase demo` (Postgres, SSL require + ignore certificate), `GHL clinic`, `GHL store`, `Meta CAPI`, `Gemini`.
 
 ## One-time GoHighLevel setup per client sub-account

@@ -199,7 +199,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// Lumière Skin Clinic: find demo contacts older than 7 days (deleted next step), then save this run's leads.\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"lX1GDRcqD985tKgOM4I3\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst reqs = [{ kind: 'old', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: 'demo' },\n  { field: 'dateAdded', operator: 'range', value: { lt: new Date(Date.now() - 7 * 864e5).toISOString() } }], sort: [{ field: 'dateAdded', direction: 'asc' }] } } }];\nfor (const l of plan.leads.clinic) {\n  const body = { locationId: C.location, firstName: l.firstName, lastName: l.lastName, email: l.email, phone: l.phone,\n    tags: ['demo', `run:${plan.runId}`, `created:${Date.parse(l.createdAt)}`] };\n  if (l.source) body.source = l.source;\n  reqs.push({ kind: 'contact', leadId: l.id, req: { method: 'POST', url: `${G}/contacts/`, body } });\n}\nreturn reqs.map(json => ({ json }));"
+        "jsCode": "// Lumière Skin Clinic: save this run's leads.\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"lX1GDRcqD985tKgOM4I3\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst reqs = [];\nfor (const l of plan.leads.clinic) {\n  const body = { locationId: C.location, firstName: l.firstName, lastName: l.lastName, email: l.email, phone: l.phone,\n    tags: ['demo', `run:${plan.runId}`, `created:${Date.parse(l.createdAt)}`] };\n  if (l.source) body.source = l.source;\n  reqs.push({ kind: 'contact', leadId: l.id, req: { method: 'POST', url: `${G}/contacts/`, body } });\n}\n// ponytail: one harmless lookup when there's nothing to save (n8n stops a branch with no items)\nif (!reqs.length) reqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });\nreturn reqs.map(json => ({ json }));"
       }
     },
     {
@@ -238,7 +238,7 @@
           },
           "batching": {
             "batch": {
-              "batchSize": 8,
+              "batchSize": 2,
               "batchInterval": 1000
             }
           }
@@ -253,8 +253,8 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "5756c6e9-60b8-dd07-96e4-7212a3bcb14c",
-      "name": "Store: contacts",
+      "id": "6c9c673c-b45a-27d4-20da-ee3ed93e695c",
+      "name": "GHL clinic: save contacts (refused)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -262,75 +262,62 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// Northwind Home: find demo contacts older than 7 days (deleted next step), then save this run's leads.\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"VxYMePPrdwUBRt79Z4wC\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst reqs = [{ kind: 'old', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: 'demo' },\n  { field: 'dateAdded', operator: 'range', value: { lt: new Date(Date.now() - 7 * 864e5).toISOString() } }], sort: [{ field: 'dateAdded', direction: 'asc' }] } } }];\nfor (const l of plan.leads.store) {\n  const body = { locationId: C.location, firstName: l.firstName, lastName: l.lastName, email: l.email, phone: l.phone,\n    tags: ['demo', `run:${plan.runId}`, `created:${Date.parse(l.createdAt)}`] };\n  if (l.source) body.source = l.source;\n  reqs.push({ kind: 'contact', leadId: l.id, req: { method: 'POST', url: `${G}/contacts/`, body } });\n}\nreturn reqs.map(json => ({ json }));"
-      }
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Clinic: contacts').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+      },
+      "alwaysOutputData": true
     },
     {
-      "id": "ffbed483-31cc-6c1a-80a5-88a6a3c4ed99",
-      "name": "GHL store: save contacts",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "id": "789e7a5c-932e-8bc8-3066-346090700e6c",
+      "name": "GHL clinic: save contacts (any refused?)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
       "position": [
         2200,
         -300
       ],
       "parameters": {
-        "method": "={{ $json.req.method }}",
-        "url": "={{ $json.req.url }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Version",
-              "value": "2021-07-28"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
-        "options": {
-          "timeout": 30000,
-          "response": {
-            "response": {
-              "fullResponse": true,
-              "neverError": true
-            }
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
           },
-          "batching": {
-            "batch": {
-              "batchSize": 8,
-              "batchInterval": 1000
+          "conditions": [
+            {
+              "id": "822b18e3-70d5-cf8f-c1fa-b16c40223058",
+              "leftValue": "={{ !!$json.req }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
             }
-          }
-        }
-      },
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "RlsELkh82v73dkEB",
-          "name": "GHL store"
-        }
-      },
-      "onError": "continueRegularOutput"
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
     },
     {
-      "id": "0a203949-8bb8-9905-328b-f93011344c00",
-      "name": "Clinic: deals",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "8c17966b-bc0d-e0c6-489c-a96a57f6eeb0",
+      "name": "GHL clinic: save contacts (pause)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
       "position": [
         2420,
         -300
       ],
       "parameters": {
-        "jsCode": "// Lumière Skin Clinic: a deal for each booked/cancelled lead, and delete demo contacts older than 7 days (their deals go with them).\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"lX1GDRcqD985tKgOM4I3\",\"pipeline\":\"e3YMhd6OJWtcGA9MFPnx\",\"stage\":\"8530b169-8cdc-4a71-bfc7-165e969395a6\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst sent = $('Clinic: contacts').all().map(i => i.json);\nconst got = $('GHL clinic: save contacts').all().map(i => i.json);\nconst weekAgo = Date.now() - 7 * 864e5;\nconst reqs = [];\nsent.forEach((s, i) => {\n  const r = got[i] || {};\n  if (s.kind === 'old' && r.statusCode === 200) {\n    for (const old of r.body?.contacts || []) if (Date.parse(old.dateAdded) < weekAgo) reqs.push({ kind: 'delete', req: { method: 'DELETE', url: `${G}/contacts/${old.id}` } });\n  }\n  if (s.kind === 'contact' && r.statusCode < 300 && r.body?.contact) {\n    const lead = plan.leads.clinic.find(l => l.id === s.leadId);\n    if (lead.outcome === 'open') return;\n    reqs.push({ kind: 'deal', contactId: r.body.contact.id, req: { method: 'POST', url: `${G}/opportunities/`, body: {\n      locationId: C.location, pipelineId: C.pipeline, pipelineStageId: C.stage, contactId: r.body.contact.id,\n      name: `${lead.firstName} ${lead.lastName} – consultation`, status: lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: lead.value } } });\n  }\n});\n// ponytail: one harmless lookup so this list is never empty (n8n stops a branch with no items)\nreqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });\nreturn reqs.map(json => ({ json }));"
-      }
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "webhookId": "e36e9304-682f-0106-25d4-1f81578fba97"
     },
     {
-      "id": "babbf0eb-b411-e156-76bc-d89a83c44dc0",
-      "name": "GHL clinic: save deals",
+      "id": "9749f242-cf3e-736c-2301-569298a1c519",
+      "name": "GHL clinic: save contacts (retry)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -364,7 +351,7 @@
           },
           "batching": {
             "batch": {
-              "batchSize": 8,
+              "batchSize": 2,
               "batchInterval": 1000
             }
           }
@@ -379,8 +366,8 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "13b5b679-1375-42e7-3247-c9ae05028c50",
-      "name": "Store: deals",
+      "id": "5756c6e9-60b8-dd07-96e4-7212a3bcb14c",
+      "name": "Store: contacts",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -388,12 +375,12 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// Northwind Home: a deal for each booked/cancelled lead, and delete demo contacts older than 7 days (their deals go with them).\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"VxYMePPrdwUBRt79Z4wC\",\"pipeline\":\"F1gLtHkYfr2SF8ulCrzs\",\"stage\":\"e5dc2f2e-3fdc-4e7d-af22-88009d9f79c3\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst sent = $('Store: contacts').all().map(i => i.json);\nconst got = $('GHL store: save contacts').all().map(i => i.json);\nconst weekAgo = Date.now() - 7 * 864e5;\nconst reqs = [];\nsent.forEach((s, i) => {\n  const r = got[i] || {};\n  if (s.kind === 'old' && r.statusCode === 200) {\n    for (const old of r.body?.contacts || []) if (Date.parse(old.dateAdded) < weekAgo) reqs.push({ kind: 'delete', req: { method: 'DELETE', url: `${G}/contacts/${old.id}` } });\n  }\n  if (s.kind === 'contact' && r.statusCode < 300 && r.body?.contact) {\n    const lead = plan.leads.store.find(l => l.id === s.leadId);\n    if (lead.outcome === 'open') return;\n    reqs.push({ kind: 'deal', contactId: r.body.contact.id, req: { method: 'POST', url: `${G}/opportunities/`, body: {\n      locationId: C.location, pipelineId: C.pipeline, pipelineStageId: C.stage, contactId: r.body.contact.id,\n      name: `${lead.firstName} ${lead.lastName} – order`, status: lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: lead.value } } });\n  }\n});\n// ponytail: one harmless lookup so this list is never empty (n8n stops a branch with no items)\nreqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });\nreturn reqs.map(json => ({ json }));"
+        "jsCode": "// Northwind Home: save this run's leads.\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"VxYMePPrdwUBRt79Z4wC\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst reqs = [];\nfor (const l of plan.leads.store) {\n  const body = { locationId: C.location, firstName: l.firstName, lastName: l.lastName, email: l.email, phone: l.phone,\n    tags: ['demo', `run:${plan.runId}`, `created:${Date.parse(l.createdAt)}`] };\n  if (l.source) body.source = l.source;\n  reqs.push({ kind: 'contact', leadId: l.id, req: { method: 'POST', url: `${G}/contacts/`, body } });\n}\n// ponytail: one harmless lookup when there's nothing to save (n8n stops a branch with no items)\nif (!reqs.length) reqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });\nreturn reqs.map(json => ({ json }));"
       }
     },
     {
-      "id": "b2e05a80-8de3-c64b-3805-8acc7854bdc4",
-      "name": "GHL store: save deals",
+      "id": "ffbed483-31cc-6c1a-80a5-88a6a3c4ed99",
+      "name": "GHL store: save contacts",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
@@ -427,7 +414,472 @@
           },
           "batching": {
             "batch": {
-              "batchSize": 8,
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "f8e93bbd-23a4-b491-9cd5-5d089092aea1",
+      "name": "GHL store: save contacts (refused)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Store: contacts').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "ef4d6438-fed6-55e2-3fd5-90a8cae84f8f",
+      "name": "GHL store: save contacts (any refused?)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3520,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "f391c53b-c2b7-76e9-2c68-a32bea94c3c6",
+              "leftValue": "={{ !!$json.req }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7d19db88-e5e5-fde5-7d45-a31fe69f83a2",
+      "name": "GHL store: save contacts (pause)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3740,
+        -300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "webhookId": "9735a0eb-0f9a-516f-a6db-ef5d5b0d6e68"
+    },
+    {
+      "id": "d268d80c-2ce2-5cc8-edd9-b8bd332123d4",
+      "name": "GHL store: save contacts (retry)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "0a203949-8bb8-9905-328b-f93011344c00",
+      "name": "Clinic: deals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Lumière Skin Clinic: a deal for each booked/cancelled lead.\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"lX1GDRcqD985tKgOM4I3\",\"pipeline\":\"e3YMhd6OJWtcGA9MFPnx\",\"stage\":\"8530b169-8cdc-4a71-bfc7-165e969395a6\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst sent = $('Clinic: contacts').all().map(i => i.json);\nconst answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };\nconst got = answers('GHL clinic: save contacts');\nconst reqs = [];\nsent.forEach((s, i) => {\n  const r = got[i] || {};\n  if (s.kind === 'contact' && r.statusCode < 300 && r.body?.contact) {\n    const lead = plan.leads.clinic.find(l => l.id === s.leadId);\n    if (lead.outcome === 'open') return;\n    reqs.push({ kind: 'deal', contactId: r.body.contact.id, req: { method: 'POST', url: `${G}/opportunities/`, body: {\n      locationId: C.location, pipelineId: C.pipeline, pipelineStageId: C.stage, contactId: r.body.contact.id,\n      name: `${lead.firstName} ${lead.lastName} – consultation`, status: lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: lead.value } } });\n  }\n});\n// ponytail: one harmless lookup when there's nothing to save (n8n stops a branch with no items)\nif (!reqs.length) reqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });\nreturn reqs.map(json => ({ json }));"
+      }
+    },
+    {
+      "id": "babbf0eb-b411-e156-76bc-d89a83c44dc0",
+      "name": "GHL clinic: save deals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4400,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "9ac9f2ec-89b3-90dd-34a7-02f85456f3ab",
+      "name": "GHL clinic: save deals (refused)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Clinic: deals').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "3f66eecc-83ca-1a42-cbed-d252ef282925",
+      "name": "GHL clinic: save deals (any refused?)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "779f1155-3663-c38d-b5c9-78f58a79d42a",
+              "leftValue": "={{ !!$json.req }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "480b5331-24a0-d849-01e8-17bdf79e8d1e",
+      "name": "GHL clinic: save deals (pause)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        5060,
+        -300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "webhookId": "c5b9fbdc-402a-7ee6-ae37-1eb2f250842a"
+    },
+    {
+      "id": "6bde6332-f126-ae63-1548-ab89e4c0b56a",
+      "name": "GHL clinic: save deals (retry)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5280,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "13b5b679-1375-42e7-3247-c9ae05028c50",
+      "name": "Store: deals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Northwind Home: a deal for each booked/cancelled lead.\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"VxYMePPrdwUBRt79Z4wC\",\"pipeline\":\"F1gLtHkYfr2SF8ulCrzs\",\"stage\":\"e5dc2f2e-3fdc-4e7d-af22-88009d9f79c3\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst sent = $('Store: contacts').all().map(i => i.json);\nconst answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };\nconst got = answers('GHL store: save contacts');\nconst reqs = [];\nsent.forEach((s, i) => {\n  const r = got[i] || {};\n  if (s.kind === 'contact' && r.statusCode < 300 && r.body?.contact) {\n    const lead = plan.leads.store.find(l => l.id === s.leadId);\n    if (lead.outcome === 'open') return;\n    reqs.push({ kind: 'deal', contactId: r.body.contact.id, req: { method: 'POST', url: `${G}/opportunities/`, body: {\n      locationId: C.location, pipelineId: C.pipeline, pipelineStageId: C.stage, contactId: r.body.contact.id,\n      name: `${lead.firstName} ${lead.lastName} – order`, status: lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: lead.value } } });\n  }\n});\n// ponytail: one harmless lookup when there's nothing to save (n8n stops a branch with no items)\nif (!reqs.length) reqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });\nreturn reqs.map(json => ({ json }));"
+      }
+    },
+    {
+      "id": "b2e05a80-8de3-c64b-3805-8acc7854bdc4",
+      "name": "GHL store: save deals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "57f072ad-dd32-3340-9ef4-2c1fd03f5222",
+      "name": "GHL store: save deals (refused)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5940,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Store: deals').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "550d96b5-cb43-2d3e-4bdb-e61a698cb450",
+      "name": "GHL store: save deals (any refused?)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        6160,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "ede6c7e6-081e-ada5-3cc9-0154e6401ad3",
+              "leftValue": "={{ !!$json.req }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "f1c7c1cc-1122-ed47-fc56-aedc1da51032",
+      "name": "GHL store: save deals (pause)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        6380,
+        -300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "webhookId": "e2f0995a-7577-3b52-1dd0-2527e968906b"
+    },
+    {
+      "id": "a4b9f100-d190-1677-0668-8282fe859742",
+      "name": "GHL store: save deals (retry)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        6600,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
               "batchInterval": 1000
             }
           }
@@ -447,11 +899,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3300,
+        6820,
         -300
       ],
       "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\n// The report uses what GoHighLevel saved and sent back, not what was generated.\nconst plan = $('Plan run').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nconst rng = makeRng(plan.seed + 1);\nlet steps = $('Decide').first().json.steps;\nconst ghlNotes = [], out = {};\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nlet ghlStatus = 'done';\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = $(b).all().map(i => i.json); return x.map((s, i) => [s, y[i] || {}]); };\n  const contacts = [], deals = new Map(); let total = 0, failed = 0;\n  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) {\n    if (s.kind !== 'contact') continue;\n    total++;\n    if (r.statusCode < 300 && r.body?.contact) contacts.push(r.body.contact); else failed++;\n  }\n  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) {\n    if (s.kind !== 'deal') continue;\n    total++;\n    if (r.statusCode < 300 && r.body?.opportunity) deals.set(s.contactId, r.body.opportunity); else failed++;\n  }\n  const leads = contacts.map(c => {\n    const d = deals.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }\n  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }\n  const spend = simulateSpend(client, leads, plan.problems, rng);\n  const meta = buildMetaEvents(client, leads, plan.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend, ...meta };\n}\nsteps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, clients: out, steps } }];"
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };\n// The report uses what GoHighLevel saved and sent back, not what was generated.\nconst plan = $('Plan run').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nconst rng = makeRng(plan.seed + 1);\nlet steps = $('Decide').first().json.steps;\nconst ghlNotes = [], out = {};\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nlet ghlStatus = 'done';\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = answers(b); return x.map((s, i) => [s, y[i] || {}]); };\n  const contacts = [], deals = new Map(); let total = 0, failed = 0;\n  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) {\n    if (s.kind !== 'contact') continue;\n    total++;\n    if (r.statusCode < 300 && r.body?.contact) contacts.push(r.body.contact); else failed++;\n  }\n  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) {\n    if (s.kind !== 'deal') continue;\n    total++;\n    if (r.statusCode < 300 && r.body?.opportunity) deals.set(s.contactId, r.body.opportunity); else failed++;\n  }\n  const leads = contacts.map(c => {\n    const d = deals.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }\n  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }\n  const spend = simulateSpend(client, leads, plan.problems, rng);\n  const meta = buildMetaEvents(client, leads, plan.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend, ...meta };\n}\nsteps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, clients: out, steps } }];"
       }
     },
     {
@@ -460,7 +912,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        3520,
+        7040,
         -300
       ],
       "parameters": {
@@ -483,7 +935,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3740,
+        7260,
         -300
       ],
       "parameters": {
@@ -496,7 +948,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3960,
+        7480,
         -300
       ],
       "parameters": {
@@ -535,7 +987,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4180,
+        7700,
         -300
       ],
       "parameters": {
@@ -548,7 +1000,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        4400,
+        7920,
         -300
       ],
       "parameters": {
@@ -571,7 +1023,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        4620,
+        8140,
         -300
       ],
       "parameters": {
@@ -606,7 +1058,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4840,
+        8360,
         -300
       ],
       "parameters": {
@@ -619,7 +1071,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        5060,
+        8580,
         -300
       ],
       "parameters": {
@@ -635,6 +1087,258 @@
           "name": "Supabase demo"
         }
       }
+    },
+    {
+      "id": "a9102b5d-641d-a06d-3751-a65e8b6bc443",
+      "name": "Clinic: find old contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        600
+      ],
+      "parameters": {
+        "jsCode": "// the oldest demo contacts in Lumière Skin Clinic older than 168 hours\nreturn [{ json: { req: { method: 'POST', url: 'https://services.leadconnectorhq.com/contacts/search', body: { locationId: 'lX1GDRcqD985tKgOM4I3', pageLimit: 25,\n  filters: [{ field: 'tags', operator: 'eq', value: 'demo' },\n    { field: 'dateAdded', operator: 'range', value: { lt: new Date(Date.now() - 168 * 36e5).toISOString() } }],\n  sort: [{ field: 'dateAdded', direction: 'asc' }] } } } }];"
+      }
+    },
+    {
+      "id": "08a10d5a-60cd-dbff-2dae-d699dffef5bf",
+      "name": "GHL clinic: find old contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        600
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "5f993723-525e-aca4-fd5b-77f89319596f",
+      "name": "Clinic: old contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        600
+      ],
+      "parameters": {
+        "jsCode": "// one delete per contact found; none found = no items, and the branch just ends\nconst cutoff = Date.now() - 168 * 36e5;\nconst r = $input.first().json;\nconst old = r.statusCode === 200 ? (r.body?.contacts || []).filter(c => Date.parse(c.dateAdded) < cutoff) : [];\nreturn old.slice(0, 25).map(c => ({ json: { req: { method: 'DELETE', url: 'https://services.leadconnectorhq.com/contacts/' + c.id } } }));"
+      }
+    },
+    {
+      "id": "26360c50-8599-ea39-641e-0b5fe407f8fa",
+      "name": "GHL clinic: delete old contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        600
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "1e849250-0261-195e-11a5-9b53ad66cd6a",
+      "name": "Store: find old contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// the oldest demo contacts in Northwind Home older than 168 hours\nreturn [{ json: { req: { method: 'POST', url: 'https://services.leadconnectorhq.com/contacts/search', body: { locationId: 'VxYMePPrdwUBRt79Z4wC', pageLimit: 25,\n  filters: [{ field: 'tags', operator: 'eq', value: 'demo' },\n    { field: 'dateAdded', operator: 'range', value: { lt: new Date(Date.now() - 168 * 36e5).toISOString() } }],\n  sort: [{ field: 'dateAdded', direction: 'asc' }] } } } }];"
+      }
+    },
+    {
+      "id": "ce3f513e-eb41-9cf5-7b23-8c4c111c13e0",
+      "name": "GHL store: find old contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        800
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "cf3fd92b-ccdd-a4d3-7952-124daac5a1b2",
+      "name": "Store: old contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        800
+      ],
+      "parameters": {
+        "jsCode": "// one delete per contact found; none found = no items, and the branch just ends\nconst cutoff = Date.now() - 168 * 36e5;\nconst r = $input.first().json;\nconst old = r.statusCode === 200 ? (r.body?.contacts || []).filter(c => Date.parse(c.dateAdded) < cutoff) : [];\nreturn old.slice(0, 25).map(c => ({ json: { req: { method: 'DELETE', url: 'https://services.leadconnectorhq.com/contacts/' + c.id } } }));"
+      }
+    },
+    {
+      "id": "d6d22a04-47fd-5d48-0e84-cfb2bca55620",
+      "name": "GHL store: delete old contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        800
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -759,6 +1463,57 @@
       "main": [
         [
           {
+            "node": "GHL clinic: save contacts (refused)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save contacts (refused)": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: save contacts (any refused?)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save contacts (any refused?)": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: save contacts (pause)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Store: contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save contacts (pause)": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: save contacts (retry)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save contacts (retry)": {
+      "main": [
+        [
+          {
             "node": "Store: contacts",
             "type": "main",
             "index": 0
@@ -778,6 +1533,57 @@
       ]
     },
     "GHL store: save contacts": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save contacts (refused)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save contacts (refused)": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save contacts (any refused?)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save contacts (any refused?)": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save contacts (pause)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clinic: deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save contacts (pause)": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save contacts (retry)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save contacts (retry)": {
       "main": [
         [
           {
@@ -803,6 +1609,57 @@
       "main": [
         [
           {
+            "node": "GHL clinic: save deals (refused)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save deals (refused)": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: save deals (any refused?)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save deals (any refused?)": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: save deals (pause)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Store: deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save deals (pause)": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: save deals (retry)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save deals (retry)": {
+      "main": [
+        [
+          {
             "node": "Store: deals",
             "type": "main",
             "index": 0
@@ -822,6 +1679,57 @@
       ]
     },
     "GHL store: save deals": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save deals (refused)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save deals (refused)": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save deals (any refused?)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save deals (any refused?)": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save deals (pause)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CRM data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save deals (pause)": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save deals (retry)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save deals (retry)": {
       "main": [
         [
           {
@@ -914,6 +1822,88 @@
         [
           {
             "node": "Save result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save result": {
+      "main": [
+        [
+          {
+            "node": "Clinic: find old contacts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Store: find old contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic: find old contacts": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: find old contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: find old contacts": {
+      "main": [
+        [
+          {
+            "node": "Clinic: old contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic: old contacts": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: delete old contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store: find old contacts": {
+      "main": [
+        [
+          {
+            "node": "GHL store: find old contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: find old contacts": {
+      "main": [
+        [
+          {
+            "node": "Store: old contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store: old contacts": {
+      "main": [
+        [
+          {
+            "node": "GHL store: delete old contacts",
             "type": "main",
             "index": 0
           }

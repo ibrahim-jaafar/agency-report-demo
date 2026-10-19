@@ -45,3 +45,19 @@ test('lib is injected byte for byte (no $-pattern rewriting)', () => {
   const lib = 'const money = n => `$${n}`; // $& $\' $1';
   assert.equal(buildWorkflow(tpl, lib).nodes[0].parameters.jsCode, lib);
 });
+
+test('answers() puts retried GoHighLevel replies back in their place', () => {
+  const wf = JSON.parse(readFileSync(new URL('../workflows/src/demo-run.json', import.meta.url), 'utf8'));
+  const line = wf.nodes.find(n => n.name === 'CRM data').parameters.jsCode.split('\n').find(l => l.startsWith('const answers'));
+  const j = o => ({ json: o });
+  const nodes = {
+    N: [j({ statusCode: 201, a: 0 }), j({ statusCode: 429 }), j({ statusCode: 201, a: 2 }), j({ statusCode: 429 })],
+    'N (refused)': [j({ i: 1 }), j({ i: 3 })],
+    'N (retry)': [j({ statusCode: 201, a: 1 }), j({ statusCode: 429 })],
+  };
+  const $ = n => ({ all: () => nodes[n], isExecuted: n in nodes });
+  const answers = new Function('$', `${line}\nreturn answers;`)($);
+  assert.deepEqual(answers('N').map(r => r.a ?? r.statusCode), [0, 1, 2, 429]);
+  delete nodes['N (retry)'];
+  assert.deepEqual(answers('N').map(r => r.a ?? r.statusCode), [0, 429, 2, 429]);
+});

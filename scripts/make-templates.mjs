@@ -33,11 +33,9 @@ function workflow(name, steps) {
     }
     const node = { id: sid(`${name}/${s.name}`), name: s.name, type: s.type, typeVersion: s.v, position: [x, s.y || 0], parameters: s.params, ...s.extra };
     nodes.push(node);
-    if (prev) {
-      const [from, out] = Array.isArray(prev) ? prev : [prev, 0];
-      connections[from] ??= { main: [] };
-      (connections[from].main[out] ??= []).push({ node: s.name, type: 'main', index: 0 });
-    }
+    const link = ([from, out]) => { connections[from] ??= { main: [] }; (connections[from].main[out] ??= []).push({ node: s.name, type: 'main', index: 0 }); };
+    if (prev) link(Array.isArray(prev) ? prev : [prev, 0]);
+    if (s.alsoFrom) link(s.alsoFrom); // a second way in, e.g. the "nothing to retry" side of an IF
     prev = s.name; x += 220;
   }
   return { name, nodes, connections, settings: { executionOrder: 'v1' } };
@@ -53,7 +51,33 @@ const http = (name, creds, { headers = [], batch, timeout = 30000, y } = {}) => 
     sendBody: true, specifyBody: 'json', jsonBody: '={{ JSON.stringify($json.req.body ?? {}) }}',
     options: { timeout, response: { response: { fullResponse: true, neverError: true } }, ...(batch ? { batching: { batch: { batchSize: batch, batchInterval: 1000 } } } : {}) } },
   extra: { credentials: creds, onError: 'continueRegularOutput' } });
-const ghlHttp = (c, what, y) => http(`GHL ${c}: ${what}`, header(...CLIENTS[c].cred), { headers: [['Version', '2021-07-28']], batch: 8, y });
+// Our GoHighLevel token allows 25 requests per 10 s per sub-account (its X-RateLimit headers say so; the docs say 100).
+// 2 a second stays under that. GHL_BATCH=25 is only for testing the retry below.
+const GHL_BATCH = Number(process.env.GHL_BATCH) || 2;
+const ghlHttp = (c, what, y) => http(`GHL ${c}: ${what}`, header(...CLIENTS[c].cred), { headers: [['Version', '2021-07-28']], batch: GHL_BATCH, y });
+const ifTrue = (expr, id) => ({ conditions: { options: { caseSensitive: true, leftValue: '', typeValidation: 'loose' },
+  conditions: [{ id, leftValue: expr, rightValue: '', operator: { type: 'boolean', operation: 'true', singleValue: true } }], combinator: 'and' }, options: {} });
+// Save to GoHighLevel; anything refused for the rate limit (429) is sent once more after a 10-second pause.
+// `from` is the Code node that built the requests. The step after this needs afterSave() for the "nothing refused" path.
+const ghlSave = (c, what, from, y) => {
+  const n = `GHL ${c}: ${what}`;
+  return [
+    ghlHttp(c, what, y),
+    { ...codeNode(`${n} (refused)`, [
+      '// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it',
+      `const sent = $('${from}').all().map(i => i.json);`,
+      'return $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);'], y), extra: { alwaysOutputData: true } },
+    { name: `${n} (any refused?)`, y, type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ !!$json.req }}', sid(`${n} refused`)) },
+    { name: `${n} (pause)`, y, type: 'n8n-nodes-base.wait', v: 1.1, params: { resume: 'timeInterval', amount: 10, unit: 'seconds' }, extra: { webhookId: sid(`${n} pause`) } },
+    { ...ghlHttp(c, what, y), name: `${n} (retry)` },
+  ];
+};
+const afterSave = (step, c, what) => ({ ...step, alsoFrom: [`GHL ${c}: ${what} (any refused?)`, 1] });
+// GoHighLevel's answers in request order, with retried answers put back in their place.
+const ANSWERS = "const answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };";
+const GHL_TEST_FLOOD = Number(process.env.GHL_TEST_FLOOD) || 0; // ponytail: test only, extra lookups that push a run over the rate limit
+const NOOP = ["// ponytail: one harmless lookup when there's nothing to save (n8n stops a branch with no items)",
+  "if (!reqs.length) reqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });"];
 
 const STEP_HELPERS = [
   'const setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);',
@@ -90,34 +114,32 @@ const refuse = [
 
 // ---------- the run (Task 12) ----------
 const contactsCode = c => [
-  `// ${CLIENTS[c].name}: find demo contacts older than 7 days (deleted next step), then save this run's leads.`,
+  `// ${CLIENTS[c].name}: save this run's leads.`,
   "const plan = $('Plan run').first().json;",
   `const C = ${JSON.stringify({ location: CLIENTS[c].location })};`,
   `const G = '${GHL}';`,
-  "const reqs = [{ kind: 'old', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: 'demo' },",
-  "  { field: 'dateAdded', operator: 'range', value: { lt: new Date(Date.now() - 7 * 864e5).toISOString() } }], sort: [{ field: 'dateAdded', direction: 'asc' }] } } }];",
+  'const reqs = [];',
   `for (const l of plan.leads.${c}) {`,
   "  const body = { locationId: C.location, firstName: l.firstName, lastName: l.lastName, email: l.email, phone: l.phone,",
   "    tags: ['demo', `run:${plan.runId}`, `created:${Date.parse(l.createdAt)}`] };",
   '  if (l.source) body.source = l.source;',
   "  reqs.push({ kind: 'contact', leadId: l.id, req: { method: 'POST', url: `${G}/contacts/`, body } });",
   '}',
+  ...NOOP,
+  ...(GHL_TEST_FLOOD ? [`for (let i = 0; i < ${GHL_TEST_FLOOD}; i++) reqs.unshift({ kind: 'noop', req: { method: 'POST', url: \`\${G}/contacts/search\`, body: { locationId: C.location, pageLimit: 1 } } });`] : []),
   'return reqs.map(json => ({ json }));',
 ];
 const dealsCode = c => [
-  `// ${CLIENTS[c].name}: a deal for each booked/cancelled lead, and delete demo contacts older than 7 days (their deals go with them).`,
+  `// ${CLIENTS[c].name}: a deal for each booked/cancelled lead.`,
   "const plan = $('Plan run').first().json;",
   `const C = ${JSON.stringify({ location: CLIENTS[c].location, pipeline: CLIENTS[c].pipeline, stage: CLIENTS[c].stage })};`,
   `const G = '${GHL}';`,
   `const sent = $('${CLIENTS[c].label}: contacts').all().map(i => i.json);`,
-  `const got = $('GHL ${c}: save contacts').all().map(i => i.json);`,
-  'const weekAgo = Date.now() - 7 * 864e5;',
+  ANSWERS,
+  `const got = answers('GHL ${c}: save contacts');`,
   'const reqs = [];',
   'sent.forEach((s, i) => {',
   '  const r = got[i] || {};',
-  "  if (s.kind === 'old' && r.statusCode === 200) {",
-  "    for (const old of r.body?.contacts || []) if (Date.parse(old.dateAdded) < weekAgo) reqs.push({ kind: 'delete', req: { method: 'DELETE', url: `${G}/contacts/${old.id}` } });",
-  '  }',
   "  if (s.kind === 'contact' && r.statusCode < 300 && r.body?.contact) {",
   `    const lead = plan.leads.${c}.find(l => l.id === s.leadId);`,
   "    if (lead.outcome === 'open') return;",
@@ -126,8 +148,7 @@ const dealsCode = c => [
   `      name: \`\${lead.firstName} \${lead.lastName} – ${c === 'clinic' ? 'consultation' : 'order'}\`, status: lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: lead.value } } });`,
   '  }',
   '});',
-  '// ponytail: one harmless lookup so this list is never empty (n8n stops a branch with no items)',
-  "reqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });",
+  ...NOOP,
   'return reqs.map(json => ({ json }));',
 ];
 
@@ -160,16 +181,17 @@ const run = [
     "const leads = { clinic: generateLeads('clinic', problems, rng, weekStart), store: generateLeads('store', problems, rng, weekStart) };",
     'return [{ json: { runId, seed, problems, weekStart: weekStart.toISOString(), leads } }];'], -300),
   codeNode('Clinic: contacts', contactsCode('clinic'), -300),
-  ghlHttp('clinic', 'save contacts', -300),
-  codeNode('Store: contacts', contactsCode('store'), -300),
-  ghlHttp('store', 'save contacts', -300),
-  codeNode('Clinic: deals', dealsCode('clinic'), -300),
-  ghlHttp('clinic', 'save deals', -300),
-  codeNode('Store: deals', dealsCode('store'), -300),
-  ghlHttp('store', 'save deals', -300),
-  codeNode('CRM data', [
+  ...ghlSave('clinic', 'save contacts', 'Clinic: contacts', -300),
+  afterSave(codeNode('Store: contacts', contactsCode('store'), -300), 'clinic', 'save contacts'),
+  ...ghlSave('store', 'save contacts', 'Store: contacts', -300),
+  afterSave(codeNode('Clinic: deals', dealsCode('clinic'), -300), 'store', 'save contacts'),
+  ...ghlSave('clinic', 'save deals', 'Clinic: deals', -300),
+  afterSave(codeNode('Store: deals', dealsCode('store'), -300), 'clinic', 'save deals'),
+  ...ghlSave('store', 'save deals', 'Store: deals', -300),
+  afterSave(codeNode('CRM data', [
     '/*@lib*/',
     ...STEP_HELPERS,
+    ANSWERS,
     "// The report uses what GoHighLevel saved and sent back, not what was generated.",
     "const plan = $('Plan run').first().json;",
     "const crypto = require('crypto');",
@@ -181,7 +203,7 @@ const run = [
     `const NAMES = ${JSON.stringify({ clinic: [CLIENTS.clinic.label, CLIENTS.clinic.name], store: [CLIENTS.store.label, CLIENTS.store.name] })};`,
     "let ghlStatus = 'done';",
     'for (const [client, [label, name]] of Object.entries(NAMES)) {',
-    "  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = $(b).all().map(i => i.json); return x.map((s, i) => [s, y[i] || {}]); };",
+    "  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = answers(b); return x.map((s, i) => [s, y[i] || {}]); };",
     "  const contacts = [], deals = new Map(); let total = 0, failed = 0;",
     "  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) {",
     "    if (s.kind !== 'contact') continue;",
@@ -208,7 +230,7 @@ const run = [
     "steps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);",
     "steps = setStep(steps, 'spend', 'done');",
     "steps = setStep(steps, 'meta', 'running');",
-    'return [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, clients: out, steps } }];'], -300),
+    'return [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, clients: out, steps } }];'], -300), 'store', 'save deals'),
   sql('Save progress 1', [
     '-- show the visitor the CRM step is done; also fetch the last finished report to compare against',
     'with u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)',
@@ -297,7 +319,32 @@ const run = [
     '={{ [$json.runId, $json.status, JSON.stringify($json.report), JSON.stringify($json.steps)] }}', -300),
 ];
 
-const demoRun = workflow('demo-run', [...start, ...refuse, ...run]);
+// ---------- cleanup: after the report is saved, delete demo contacts older than 7 days (GoHighLevel removes their deals too) ----------
+// Here and not on a schedule: the free server sleeps, so a nightly job wouldn't fire. The visitor already has the report.
+const CLEANUP_HOURS = Number(process.env.CLEANUP_HOURS) || 7 * 24; // ponytail: the env override is only for testing
+const CLEANUP_MAX = 25; // per client per run: more than a run creates, and about 13 s at 2 a second
+const cleanup = (c, y) => {
+  const L = CLIENTS[c].label;
+  return [
+    { branch: ['Save result', 0], x: 880 },
+    codeNode(`${L}: find old contacts`, [
+      `// the oldest demo contacts in ${CLIENTS[c].name} older than ${CLEANUP_HOURS} hours`,
+      `return [{ json: { req: { method: 'POST', url: '${GHL}/contacts/search', body: { locationId: '${CLIENTS[c].location}', pageLimit: ${CLEANUP_MAX},`,
+      "  filters: [{ field: 'tags', operator: 'eq', value: 'demo' },",
+      `    { field: 'dateAdded', operator: 'range', value: { lt: new Date(Date.now() - ${CLEANUP_HOURS} * 36e5).toISOString() } }],`,
+      "  sort: [{ field: 'dateAdded', direction: 'asc' }] } } } }];"], y),
+    ghlHttp(c, 'find old contacts', y),
+    codeNode(`${L}: old contacts`, [
+      '// one delete per contact found; none found = no items, and the branch just ends',
+      `const cutoff = Date.now() - ${CLEANUP_HOURS} * 36e5;`,
+      'const r = $input.first().json;',
+      "const old = r.statusCode === 200 ? (r.body?.contacts || []).filter(c => Date.parse(c.dateAdded) < cutoff) : [];",
+      `return old.slice(0, ${CLEANUP_MAX}).map(c => ({ json: { req: { method: 'DELETE', url: '${GHL}/contacts/' + c.id } } }));`], y),
+    ghlHttp(c, 'delete old contacts', y),
+  ];
+};
+
+const demoRun = workflow('demo-run', [...start, ...refuse, ...run, ...cleanup('clinic', 600), ...cleanup('store', 800)]);
 
 const demoStatus = workflow('demo-status', [
   { name: 'Status webhook', type: 'n8n-nodes-base.webhook', v: 2, params: { httpMethod: 'GET', path: 'demo/status', responseMode: 'lastNode', options: { allowedOrigins: ORIGIN } }, extra: { webhookId: sid('demo/status') } },

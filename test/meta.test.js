@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { makeRng } from '../lib/rng.js';
 import { generateLeads } from '../lib/leads.js';
-import { hashField, buildMetaEvents } from '../lib/meta.js';
+import { hashField, cleanName, buildMetaEvents } from '../lib/meta.js';
 
 const sha = s => createHash('sha256').update(s, 'utf8').digest('hex');
 const W = new Date('2026-10-12T00:00:00Z');
@@ -64,4 +64,14 @@ test('edge_cases adds one extra event dated 10 days ago, separate from the real 
   assert.equal(edgeEvents.length, 1);
   assert.equal(edgeEvents[0].event_time, NOW - 10 * 86400);
   assert.ok(!events.some(e => e.event_id === edgeEvents[0].event_id));
+});
+
+test('names lose punctuation and symbols before hashing, letters in any alphabet stay', () => {
+  assert.equal(cleanName("O'Brien-Smith"), 'OBrienSmith');
+  assert.equal(cleanName('Bloom 🌸'), 'Bloom ');
+  assert.equal(cleanName('Zoë'), 'Zoë');
+  assert.equal(cleanName('سارة'), 'سارة');
+  const e = buildMetaEvents('clinic', [lead({ firstName: "D'Arcy", lastName: 'Bloom 🌸' })], [], NOW, sha).events[0];
+  assert.deepEqual(e.user_data.fn, [sha('darcy')]);
+  assert.deepEqual(e.user_data.ln, [sha('bloom')]);
 });
