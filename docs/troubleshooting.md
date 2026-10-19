@@ -37,6 +37,5 @@ This guide is for the account manager who reads the report before it goes to a c
 
 Escalate when the same step fails twice in a row, or a red light stays after a rerun. Send:
 
-- the **run ID** (in the page address after a run, or ask the person who maintains the workflow to look up the latest run),
-- the **time** you ran it,
+- the **time** you ran it (the maintainer finds the run by its time),
 - a **screenshot** of the workflow strip and the client cards.
