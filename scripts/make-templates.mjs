@@ -7,11 +7,12 @@ import { createHash } from 'node:crypto';
 const env = Object.fromEntries(readFileSync(new URL('../.env', import.meta.url), 'utf8').split(/\r?\n/)
   .filter(l => l.includes('=') && !l.startsWith('#')).map(l => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()]));
 
-const ORIGIN = 'https://ibrahim-jaafar.github.io';
+const ORIGIN = process.env.DEMO_EXTRA_ORIGIN ? 'https://ibrahim-jaafar.github.io,' + process.env.DEMO_EXTRA_ORIGIN : 'https://ibrahim-jaafar.github.io';
 const GHL = 'https://services.leadconnectorhq.com';
 const META_URL = `https://graph.facebook.com/v23.0/${env.META_DATASET_ID}/events`;
 const AI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-const AI_MODEL = 'gemini-flash-latest';
+// two attempts, two models: each has its own free daily quota (20 requests each), and Flash's answer wins when both are valid
+const AI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
 const CLIENTS = {
   clinic: { label: 'Clinic', name: 'Lumière Skin Clinic', location: env.GHL_LOCATION_CLINIC, pipeline: env.GHL_PIPELINE_CLINIC, stage: env.GHL_STAGE_CLINIC_WON, cred: ['N8N_CRED_GHL_CLINIC', 'GHL clinic'] },
   store: { label: 'Store', name: 'Northwind Home', location: env.GHL_LOCATION_STORE, pipeline: env.GHL_PIPELINE_STORE, stage: env.GHL_STAGE_STORE_WON, cred: ['N8N_CRED_GHL_STORE', 'GHL store'] },
@@ -135,6 +136,7 @@ const AI_SYSTEM = [
   'Use plain, friendly English. Only use numbers that appear in the data, written the same way (you may round to whole numbers or write rates as percentages).',
   'Never calculate new numbers. Money is in US dollars: write it like $159.40. Write rates as percentages (0.6667 is 67%).',
   'Never write field names such as costPerLead or paidLeads; say "cost per lead" or "paid leads". The data covers last week (Monday to Sunday).',
+  'previousKpis and changes compare with the previous report, not with an earlier week: call them "the previous report" (for example "up 5% on the previous report"), never "the previous week" or "the week before".',
   'Explain every warning in client-friendly words, and suggest at most three practical next steps per client.',
   "Return JSON that matches the schema exactly. 'clinic' is the clinic, 'store' is the store.",
 ].join(' ');
@@ -253,7 +255,7 @@ const run = [
     "steps = setStep(steps, 'checks', 'done');",
     "steps = setStep(steps, 'ai', 'running');",
     'const aiInput = buildAiInput(clients);',
-    `const aiBody = { model: '${AI_MODEL}', messages: [{ role: 'system', content: ${JSON.stringify(AI_SYSTEM)} }, { role: 'user', content: JSON.stringify(aiInput) }],`,
+    `const aiBody = { messages: [{ role: 'system', content: ${JSON.stringify(AI_SYSTEM)} }, { role: 'user', content: JSON.stringify(aiInput) }],`,
     "  response_format: { type: 'json_schema', json_schema: { name: 'weekly_report', strict: true, schema: AI_SCHEMA } } };",
     'return [{ json: { ...crm, clients, aiInput, aiBody, steps } }];'], -300),
   sql('Save progress 2', [
@@ -263,7 +265,7 @@ const run = [
     '={{ [$json.runId, JSON.stringify($json.steps)] }}', -300),
   { name: 'AI: write summary', y: -300, type: 'n8n-nodes-base.httpRequest', v: 4.2,
     params: { method: 'POST', url: AI_URL, authentication: 'genericCredentialType', genericAuthType: 'httpHeaderAuth',
-      sendBody: true, specifyBody: 'json', jsonBody: "={{ JSON.stringify($('Checks').first().json.aiBody) }}",
+      sendBody: true, specifyBody: 'json', jsonBody: `={{ JSON.stringify({ model: ${JSON.stringify(AI_MODELS)}[$json.attempt - 1], ...$('Checks').first().json.aiBody }) }}`,
       options: { timeout: 60000, response: { response: { fullResponse: true, neverError: true } } } },
     extra: { credentials: header('N8N_CRED_GEMINI', 'Gemini'), onError: 'continueRegularOutput' } },
   codeNode('Build report', [

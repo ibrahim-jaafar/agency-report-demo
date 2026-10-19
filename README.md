@@ -24,6 +24,7 @@ Keys (GoHighLevel, Meta, Gemini) are stored only in n8n credentials.
 
 - Edit `scripts/make-templates.mjs` (not the JSON), then `node scripts/make-templates.mjs` → `workflows/src/`.
 - `node scripts/deploy.mjs` builds `dist/` (tested `lib/` pasted into the Code nodes) and uploads/publishes the 3 workflows. It needs `N8N_API_KEY` plus the IDs in `.env` (credential IDs, GHL location/pipeline/stage IDs, Meta dataset, test code).
+- To test the demo page from your own machine, build with `DEMO_EXTRA_ORIGIN=http://localhost:8765 node scripts/make-templates.mjs`, deploy, test, then build and deploy again without it.
 - n8n credentials (all **Header Auth**, `Authorization: Bearer <token>`, except the database): `Supabase demo` (Postgres, SSL require + ignore certificate), `GHL clinic`, `GHL store`, `Meta CAPI`, `Gemini`.
 
 ## One-time GoHighLevel setup per client sub-account
