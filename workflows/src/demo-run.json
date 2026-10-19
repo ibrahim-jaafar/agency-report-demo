@@ -2,7 +2,7 @@
   "name": "demo-run",
   "nodes": [
     {
-      "id": "0855843b-35de-4a53-84c6-9ee72389cbeb",
+      "id": "db5bd842-9771-39c3-d845-72daa3de5732",
       "name": "Start webhook",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
@@ -18,10 +18,10 @@
           "allowedOrigins": "https://ibrahim-jaafar.github.io"
         }
       },
-      "webhookId": "0c78b31c-1148-4972-b86f-f63c25de2f04"
+      "webhookId": "2c2831ee-298b-f89f-6032-ef8fc5348f40"
     },
     {
-      "id": "24664bd1-b63c-4584-9ebf-3072699547d0",
+      "id": "d64ccf68-0a1b-f7e5-843b-37e32ca45bb0",
       "name": "Recent runs",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
@@ -42,7 +42,7 @@
       }
     },
     {
-      "id": "9310b994-8222-4755-bf6f-718a1cdf27d0",
+      "id": "a6341f60-4b12-d5e3-b71c-3dd68466f0a7",
       "name": "Decide",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -51,11 +51,11 @@
         0
       ],
       "parameters": {
-        "jsCode": "/*@lib*/\nlet body = $('Start webhook').first().json.body;\nif (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = null; } }\nconst scenario = parseScenario(body);\nconst limit = checkLimits($input.first().json.runs || [], new Date());\nconst steps = ['ghl', 'spend', 'meta', 'checks', 'ai'].map(key => ({ key, status: 'pending' }));\nreturn [{ json: { scenario, limit, steps } }];"
+        "jsCode": "/*@lib*/\nlet body = $('Start webhook').first().json.body;\nif (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = null; } }\nconst scenario = parseScenario(body);\nconst limit = checkLimits($input.first().json.runs || [], new Date());\nconst steps = ['ghl', 'spend', 'meta', 'checks', 'ai'].map(key => ({ key, status: key === 'ghl' ? 'running' : 'pending' }));\nreturn [{ json: { scenario, limit, steps } }];"
       }
     },
     {
-      "id": "f5cb742f-490f-436f-95a5-e2648c5dd451",
+      "id": "579b712c-864a-151f-2d2a-c8f00eb26560",
       "name": "Allowed?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
@@ -72,7 +72,7 @@
           },
           "conditions": [
             {
-              "id": "84dd3241-5364-4c82-a0f6-fac1ef309e3c",
+              "id": "c3de44d5-31c0-0ca3-e038-3de27927f390",
               "leftValue": "={{ $json.limit.ok }}",
               "rightValue": "",
               "operator": {
@@ -88,13 +88,64 @@
       }
     },
     {
-      "id": "5833ceb0-bc2f-4e08-91c5-5210d670629e",
+      "id": "5f8fa784-351c-5946-9d18-e529ff41269b",
+      "name": "Latest report",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select (select report from demo_runs where status in ('done','partial') order by created_at desc limit 1) as latest",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    },
+    {
+      "id": "9e3af9fd-b822-9d0f-0fad-a03fb7be3a05",
+      "name": "Refusal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const { limit } = $('Decide').first().json;\nif (limit.reason === 'running') return [{ json: { code: 200, body: { runId: limit.runId, joined: true } } }];\nreturn [{ json: { code: 429, body: { reason: limit.reason, retryAfterSec: limit.retryAfterSec, latest: $input.first().json.latest ?? null } } }];"
+      }
+    },
+    {
+      "id": "778641a2-3c76-bfc3-27e5-b0e251b42384",
+      "name": "Respond refused",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.code }}"
+        }
+      }
+    },
+    {
+      "id": "e1b1765e-5178-c888-cdb3-7936018cedc9",
       "name": "Create run",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
         880,
-        -120
+        -300
       ],
       "parameters": {
         "operation": "executeQuery",
@@ -111,13 +162,13 @@
       }
     },
     {
-      "id": "163f54c3-1b97-439e-aed9-527663f0b77f",
+      "id": "8703da20-a5e7-e049-095e-ca05ab39471c",
       "name": "Respond started",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [
         1100,
-        -120
+        -300
       ],
       "parameters": {
         "respondWith": "json",
@@ -126,76 +177,462 @@
       }
     },
     {
-      "id": "dbc04850-4c76-4377-9a0e-8a80334adb5a",
+      "id": "94ebfff3-1791-f8a8-9177-7bf3d141b41f",
+      "name": "Plan run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\n// The visitor already has their runId; everything below runs while the page polls the status webhook.\nconst runId = $('Create run').first().json.id;\nconst { scenario } = $('Decide').first().json;\nconst seed = parseInt(runId.replace(/-/g, '').slice(0, 8), 16);\nconst rng = makeRng(seed);\n// last full week (Monday to Monday, UTC): a weekly report covers a finished week, and no lead is dated in the future\nconst now = new Date();\nconst weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - ((now.getUTCDay() + 6) % 7) - 7));\nconst problems = resolveProblems(scenario, rng);\nconst leads = { clinic: generateLeads('clinic', problems, rng, weekStart), store: generateLeads('store', problems, rng, weekStart) };\nreturn [{ json: { runId, seed, problems, weekStart: weekStart.toISOString(), leads } }];"
+      }
+    },
+    {
+      "id": "547912ce-31cb-e943-7da3-8dd2fe6ac6da",
+      "name": "Clinic: contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Lumière Skin Clinic: find demo contacts older than 7 days (deleted next step), then save this run's leads.\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"lX1GDRcqD985tKgOM4I3\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst reqs = [{ kind: 'old', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: 'demo' },\n  { field: 'dateAdded', operator: 'range', value: { lt: new Date(Date.now() - 7 * 864e5).toISOString() } }], sort: [{ field: 'dateAdded', direction: 'asc' }] } } }];\nfor (const l of plan.leads.clinic) {\n  const body = { locationId: C.location, firstName: l.firstName, lastName: l.lastName, email: l.email, phone: l.phone,\n    tags: ['demo', `run:${plan.runId}`, `created:${Date.parse(l.createdAt)}`] };\n  if (l.source) body.source = l.source;\n  reqs.push({ kind: 'contact', leadId: l.id, req: { method: 'POST', url: `${G}/contacts/`, body } });\n}\nreturn reqs.map(json => ({ json }));"
+      }
+    },
+    {
+      "id": "bb45f949-7a50-69c3-4347-92ddd7729db0",
+      "name": "GHL clinic: save contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 8,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "5756c6e9-60b8-dd07-96e4-7212a3bcb14c",
+      "name": "Store: contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Northwind Home: find demo contacts older than 7 days (deleted next step), then save this run's leads.\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"VxYMePPrdwUBRt79Z4wC\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst reqs = [{ kind: 'old', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: 'demo' },\n  { field: 'dateAdded', operator: 'range', value: { lt: new Date(Date.now() - 7 * 864e5).toISOString() } }], sort: [{ field: 'dateAdded', direction: 'asc' }] } } }];\nfor (const l of plan.leads.store) {\n  const body = { locationId: C.location, firstName: l.firstName, lastName: l.lastName, email: l.email, phone: l.phone,\n    tags: ['demo', `run:${plan.runId}`, `created:${Date.parse(l.createdAt)}`] };\n  if (l.source) body.source = l.source;\n  reqs.push({ kind: 'contact', leadId: l.id, req: { method: 'POST', url: `${G}/contacts/`, body } });\n}\nreturn reqs.map(json => ({ json }));"
+      }
+    },
+    {
+      "id": "ffbed483-31cc-6c1a-80a5-88a6a3c4ed99",
+      "name": "GHL store: save contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 8,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "0a203949-8bb8-9905-328b-f93011344c00",
+      "name": "Clinic: deals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Lumière Skin Clinic: a deal for each booked/cancelled lead, and delete demo contacts older than 7 days (their deals go with them).\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"lX1GDRcqD985tKgOM4I3\",\"pipeline\":\"e3YMhd6OJWtcGA9MFPnx\",\"stage\":\"8530b169-8cdc-4a71-bfc7-165e969395a6\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst sent = $('Clinic: contacts').all().map(i => i.json);\nconst got = $('GHL clinic: save contacts').all().map(i => i.json);\nconst weekAgo = Date.now() - 7 * 864e5;\nconst reqs = [];\nsent.forEach((s, i) => {\n  const r = got[i] || {};\n  if (s.kind === 'old' && r.statusCode === 200) {\n    for (const old of r.body?.contacts || []) if (Date.parse(old.dateAdded) < weekAgo) reqs.push({ kind: 'delete', req: { method: 'DELETE', url: `${G}/contacts/${old.id}` } });\n  }\n  if (s.kind === 'contact' && r.statusCode < 300 && r.body?.contact) {\n    const lead = plan.leads.clinic.find(l => l.id === s.leadId);\n    if (lead.outcome === 'open') return;\n    reqs.push({ kind: 'deal', contactId: r.body.contact.id, req: { method: 'POST', url: `${G}/opportunities/`, body: {\n      locationId: C.location, pipelineId: C.pipeline, pipelineStageId: C.stage, contactId: r.body.contact.id,\n      name: `${lead.firstName} ${lead.lastName} – consultation`, status: lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: lead.value } } });\n  }\n});\n// ponytail: one harmless lookup so this list is never empty (n8n stops a branch with no items)\nreqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });\nreturn reqs.map(json => ({ json }));"
+      }
+    },
+    {
+      "id": "babbf0eb-b411-e156-76bc-d89a83c44dc0",
+      "name": "GHL clinic: save deals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 8,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "13b5b679-1375-42e7-3247-c9ae05028c50",
+      "name": "Store: deals",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Northwind Home: a deal for each booked/cancelled lead, and delete demo contacts older than 7 days (their deals go with them).\nconst plan = $('Plan run').first().json;\nconst C = {\"location\":\"VxYMePPrdwUBRt79Z4wC\",\"pipeline\":\"F1gLtHkYfr2SF8ulCrzs\",\"stage\":\"e5dc2f2e-3fdc-4e7d-af22-88009d9f79c3\"};\nconst G = 'https://services.leadconnectorhq.com';\nconst sent = $('Store: contacts').all().map(i => i.json);\nconst got = $('GHL store: save contacts').all().map(i => i.json);\nconst weekAgo = Date.now() - 7 * 864e5;\nconst reqs = [];\nsent.forEach((s, i) => {\n  const r = got[i] || {};\n  if (s.kind === 'old' && r.statusCode === 200) {\n    for (const old of r.body?.contacts || []) if (Date.parse(old.dateAdded) < weekAgo) reqs.push({ kind: 'delete', req: { method: 'DELETE', url: `${G}/contacts/${old.id}` } });\n  }\n  if (s.kind === 'contact' && r.statusCode < 300 && r.body?.contact) {\n    const lead = plan.leads.store.find(l => l.id === s.leadId);\n    if (lead.outcome === 'open') return;\n    reqs.push({ kind: 'deal', contactId: r.body.contact.id, req: { method: 'POST', url: `${G}/opportunities/`, body: {\n      locationId: C.location, pipelineId: C.pipeline, pipelineStageId: C.stage, contactId: r.body.contact.id,\n      name: `${lead.firstName} ${lead.lastName} – order`, status: lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: lead.value } } });\n  }\n});\n// ponytail: one harmless lookup so this list is never empty (n8n stops a branch with no items)\nreqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });\nreturn reqs.map(json => ({ json }));"
+      }
+    },
+    {
+      "id": "b2e05a80-8de3-c64b-3805-8acc7854bdc4",
+      "name": "GHL store: save deals",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3080,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 8,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "600f3b77-7cea-b557-a401-881a0e975a03",
+      "name": "CRM data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\n// The report uses what GoHighLevel saved and sent back, not what was generated.\nconst plan = $('Plan run').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nconst rng = makeRng(plan.seed + 1);\nlet steps = $('Decide').first().json.steps;\nconst ghlNotes = [], out = {};\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nlet ghlStatus = 'done';\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = $(b).all().map(i => i.json); return x.map((s, i) => [s, y[i] || {}]); };\n  const contacts = [], deals = new Map(); let total = 0, failed = 0;\n  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) {\n    if (s.kind !== 'contact') continue;\n    total++;\n    if (r.statusCode < 300 && r.body?.contact) contacts.push(r.body.contact); else failed++;\n  }\n  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) {\n    if (s.kind !== 'deal') continue;\n    total++;\n    if (r.statusCode < 300 && r.body?.opportunity) deals.set(s.contactId, r.body.opportunity); else failed++;\n  }\n  const leads = contacts.map(c => {\n    const d = deals.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }\n  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }\n  const spend = simulateSpend(client, leads, plan.problems, rng);\n  const meta = buildMetaEvents(client, leads, plan.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend, ...meta };\n}\nsteps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, clients: out, steps } }];"
+      }
+    },
+    {
+      "id": "cec387d9-dffd-a197-5bf7-02a3b6e9c7cf",
+      "name": "Save progress 1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3520,
+        -300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- show the visitor the CRM step is done; also fetch the last finished report to compare against\nwith u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)\nselect (select report from demo_runs where status in ('done','partial') and id <> $1::uuid order by created_at desc limit 1) as prev",
+        "options": {
+          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.steps)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    },
+    {
+      "id": "38297791-7486-9f12-3da8-7c4105729f22",
+      "name": "Meta requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "const { clients } = $('CRM data').first().json;\nconst body = data => ({ data, test_event_code: 'TEST68789' });\nconst reqs = [];\nfor (const c of Object.values(clients)) {\n  // ponytail: always one request per client, even with no events (Meta then answers 400; counted as 0 sent)\n  reqs.push({ client: c.client, kind: 'main', count: c.events.length, req: { method: 'POST', url: 'https://graph.facebook.com/v23.0/2897515730634456/events', body: body(c.events) } });\n  // the deliberately too-old event goes alone, so Meta's rejection can't sink the real batch\n  if (c.edgeEvents.length) reqs.push({ client: c.client, kind: 'edge', count: c.edgeEvents.length, req: { method: 'POST', url: 'https://graph.facebook.com/v23.0/2897515730634456/events', body: body(c.edgeEvents) } });\n}\nreturn reqs.map(json => ({ json }));"
+      }
+    },
+    {
+      "id": "e818fe3f-d240-cd8b-748e-7b6ab1b767df",
+      "name": "Meta: send conversions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3960,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": false,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k6Iu2Bgfzguocbux",
+          "name": "Meta CAPI"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "ce7f5961-47db-22b7-6415-9216739f7492",
+      "name": "Checks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4180,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst crm = $('CRM data').first().json;\nconst prev = $('Save progress 1').first().json.prev;\nconst sent = $('Meta requests').all().map(i => i.json), got = $('Meta: send conversions').all().map(i => i.json);\nlet steps = crm.steps, metaFailed = [];\nconst clients = Object.values(crm.clients).map(c => {\n  let meta = { sent: 0, accepted: 0, rejected: 0 };\n  sent.forEach((s, i) => {\n    if (s.client !== c.client || !s.count) return;\n    const r = got[i] || {};\n    meta.sent += s.count;\n    if (s.kind === 'main' && r.statusCode !== 200) { metaFailed.push(`${c.name}: Meta answered ${r.statusCode ?? 'nothing'}`); meta = null; return; }\n    if (!meta) return;\n    const ok = r.statusCode === 200 ? Number(r.body?.events_received) || 0 : 0;\n    if (s.kind === 'main') meta.accepted += ok;\n    meta.rejected += s.count - ok;\n  });\n  const weekStart = new Date(crm.weekStart);\n  const kpis = computeKpis(c.client, c.leads, c.spend, weekStart);\n  const warnings = runChecks({ client: c.client, leads: c.leads, spend: c.spend, meta, weekStart });\n  const previousKpis = prev?.clients?.find(p => p.client === c.client)?.kpis ?? null;\n  return { client: c.client, name: c.name, kpis, previousKpis, warnings, skipped: c.skipped };\n});\nsteps = setStep(steps, 'meta', metaFailed.length ? 'failed' : 'done', metaFailed.join('; ') || undefined);\nsteps = setStep(steps, 'checks', 'done');\nsteps = setStep(steps, 'ai', 'running');\nconst aiInput = buildAiInput(clients);\nconst aiBody = { model: 'gemini-flash-latest', messages: [{ role: 'system', content: \"You write the weekly results summary that a marketing agency's account manager reads before sending reports to two clients. Use plain, friendly English. Only use numbers that appear in the data, written the same way (you may round to whole numbers or write rates as percentages). Never calculate new numbers. Money is in US dollars: write it like $159.40. Write rates as percentages (0.6667 is 67%). Never write field names such as costPerLead or paidLeads; say \\\"cost per lead\\\" or \\\"paid leads\\\". The data covers last week (Monday to Sunday). Explain every warning in client-friendly words, and suggest at most three practical next steps per client. Return JSON that matches the schema exactly. 'clinic' is the clinic, 'store' is the store.\" }, { role: 'user', content: JSON.stringify(aiInput) }],\n  response_format: { type: 'json_schema', json_schema: { name: 'weekly_report', strict: true, schema: AI_SCHEMA } } };\nreturn [{ json: { ...crm, clients, aiInput, aiBody, steps } }];"
+      }
+    },
+    {
+      "id": "b60ca2a3-420c-213d-2a98-1bd74a62ea67",
+      "name": "Save progress 2",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        4400,
+        -300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- show the visitor the checks are done; two rows = two AI attempts in parallel (the first valid answer wins)\nwith u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)\nselect attempt from generate_series(1, 2) as attempt",
+        "options": {
+          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.steps)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    },
+    {
+      "id": "303cf6c5-2c14-50ee-2401-1b06b7cac886",
+      "name": "AI: write summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4620,
+        -300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Checks').first().json.aiBody) }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OZF5vuPL8kSAiXEF",
+          "name": "Gemini"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d6da3373-21de-5ec0-fefe-8af9299d3a6b",
+      "name": "Build report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4840,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst ck = $('Checks').first().json;\nconst replies = $('AI: write summary').all().map(i => i.json);\nlet ai = null, gotAnswer = false; const errors = [];\nfor (const r of replies) {\n  let raw = r.statusCode === 200 ? r.body?.choices?.[0]?.message?.content : null;\n  if (raw != null && ck.problems.includes('ai_broken')) raw = \"Sorry, I can't help with that.\";\n  if (raw == null) { errors.push(`AI service answered ${r.statusCode ?? 'nothing'}`); continue; }\n  gotAnswer = true;\n  const v = validateAiOutput(raw, ck.aiInput);\n  if (v.ok) { ai = { source: 'ai', value: v.value }; break; }\n  errors.push(...v.errors);\n}\nlet steps = ck.steps;\nif (ai) steps = setStep(steps, 'ai', 'done');\nelse {\n  ai = { source: 'template', value: templateSummary(ck.aiInput) };\n  steps = gotAnswer ? setStep(steps, 'ai', 'warning', `AI answer rejected (${errors[0]}); template summary used`)\n    : setStep(steps, 'ai', 'failed', `${errors[0] || 'no AI answer'}; template summary used`);\n}\nconst metaSkipped = ck.clients.reduce((a, c) => a + c.skipped, 0);\nconst report = buildReport({ runId: ck.runId, weekStart: ck.weekStart, clients: ck.clients, steps, ai, problems: ck.problems, metaSkipped });\nreturn [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps } }];"
+      }
+    },
+    {
+      "id": "0a2f121c-9ab6-f5ed-fc4d-c40e60b5086f",
       "name": "Save result",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        1320,
-        -120
+        5060,
+        -300
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "update demo_runs set status = $2, report = $3::jsonb where id = $1::uuid",
+        "query": "update demo_runs set status = $2, report = $3::jsonb, steps = $4::jsonb where id = $1::uuid returning id",
         "options": {
-          "queryReplacement": "={{ [$('Create run').first().json.id, 'done', 'null'] }}"
+          "queryReplacement": "={{ [$json.runId, $json.status, JSON.stringify($json.report), JSON.stringify($json.steps)] }}"
         }
       },
       "credentials": {
         "postgres": {
           "id": "8VYMdYQi4ONq8evJ",
           "name": "Supabase demo"
-        }
-      }
-    },
-    {
-      "id": "7b89a036-b953-40db-b944-4eb1f4f1017b",
-      "name": "Latest report",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        880,
-        120
-      ],
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "select (select report from demo_runs where status in ('done','partial') order by created_at desc limit 1) as latest",
-        "options": {}
-      },
-      "credentials": {
-        "postgres": {
-          "id": "8VYMdYQi4ONq8evJ",
-          "name": "Supabase demo"
-        }
-      }
-    },
-    {
-      "id": "0be532f9-1ac4-4666-96b9-68b809c0c4cc",
-      "name": "Refusal",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1100,
-        120
-      ],
-      "parameters": {
-        "jsCode": "const { limit } = $('Decide').first().json;\nif (limit.reason === 'running') return [{ json: { code: 200, body: { runId: limit.runId, joined: true } } }];\nreturn [{ json: { code: 429, body: { reason: limit.reason, retryAfterSec: limit.retryAfterSec, latest: $input.first().json.latest ?? null } } }];"
-      }
-    },
-    {
-      "id": "3345961b-41a6-47f1-92f1-ecef58d9ba23",
-      "name": "Respond refused",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
-      "position": [
-        1320,
-        120
-      ],
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($json.body) }}",
-        "options": {
-          "responseCode": "={{ $json.code }}"
         }
       }
     }
@@ -252,28 +689,6 @@
         ]
       ]
     },
-    "Create run": {
-      "main": [
-        [
-          {
-            "node": "Respond started",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Respond started": {
-      "main": [
-        [
-          {
-            "node": "Save result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Latest report": {
       "main": [
         [
@@ -290,6 +705,215 @@
         [
           {
             "node": "Respond refused",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create run": {
+      "main": [
+        [
+          {
+            "node": "Respond started",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond started": {
+      "main": [
+        [
+          {
+            "node": "Plan run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan run": {
+      "main": [
+        [
+          {
+            "node": "Clinic: contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic: contacts": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: save contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save contacts": {
+      "main": [
+        [
+          {
+            "node": "Store: contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store: contacts": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save contacts": {
+      "main": [
+        [
+          {
+            "node": "Clinic: deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic: deals": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: save deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: save deals": {
+      "main": [
+        [
+          {
+            "node": "Store: deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store: deals": {
+      "main": [
+        [
+          {
+            "node": "GHL store: save deals",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: save deals": {
+      "main": [
+        [
+          {
+            "node": "CRM data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM data": {
+      "main": [
+        [
+          {
+            "node": "Save progress 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save progress 1": {
+      "main": [
+        [
+          {
+            "node": "Meta requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta requests": {
+      "main": [
+        [
+          {
+            "node": "Meta: send conversions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta: send conversions": {
+      "main": [
+        [
+          {
+            "node": "Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checks": {
+      "main": [
+        [
+          {
+            "node": "Save progress 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save progress 2": {
+      "main": [
+        [
+          {
+            "node": "AI: write summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: write summary": {
+      "main": [
+        [
+          {
+            "node": "Build report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build report": {
+      "main": [
+        [
+          {
+            "node": "Save result",
             "type": "main",
             "index": 0
           }

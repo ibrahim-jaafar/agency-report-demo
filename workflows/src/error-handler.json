@@ -1,6 +1,55 @@
 {
   "name": "error-handler",
-  "nodes": [],
-  "connections": {},
-  "settings": {}
+  "nodes": [
+    {
+      "id": "75372b36-6fde-5ba3-b2b4-90a02b7b5f0e",
+      "name": "On error",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "59908ffc-4517-ed89-695a-4441e79a8bd9",
+      "name": "Mark run failed",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update demo_runs set status = 'failed', error = $1 where status = 'running' returning id",
+        "options": {
+          "queryReplacement": "={{ [String($json.execution?.error?.message ?? 'unknown error').slice(0, 500) + ' (node: ' + ($json.execution?.lastNodeExecuted ?? '?') + ')'] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "On error": {
+      "main": [
+        [
+          {
+            "node": "Mark run failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
 }

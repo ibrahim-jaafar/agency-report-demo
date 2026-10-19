@@ -39,3 +39,9 @@ test('buildAll writes every template to dist', () => {
   assert.deepEqual(buildAll(src, dist), ['a.json']);
   assert.ok(JSON.parse(readFileSync(join(dist, 'a.json'), 'utf8')).nodes[0].parameters.jsCode.includes('function makeRng'));
 });
+
+test('lib is injected byte for byte (no $-pattern rewriting)', () => {
+  const tpl = { nodes: [{ type: 'n8n-nodes-base.code', parameters: { jsCode: '/*@lib*/' } }] };
+  const lib = 'const money = n => `$${n}`; // $& $\' $1';
+  assert.equal(buildWorkflow(tpl, lib).nodes[0].parameters.jsCode, lib);
+});

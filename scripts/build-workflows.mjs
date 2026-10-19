@@ -18,7 +18,7 @@ export function buildWorkflow(template, lib) {
   const out = structuredClone(template);
   for (const node of out.nodes || []) {
     const code = node.type === 'n8n-nodes-base.code' && node.parameters?.jsCode;
-    if (code && code.includes(MARKER)) node.parameters.jsCode = code.replace(MARKER, lib);
+    if (code && code.includes(MARKER)) node.parameters.jsCode = code.replace(MARKER, () => lib); // a function, so "$$" in lib stays "$$"
   }
   return out;
 }

@@ -19,3 +19,28 @@ A weekly marketing report built with n8n: leads from GoHighLevel, conversions se
    - The GoHighLevel test account expires on 2027-04-19.
 
 Keys (GoHighLevel, Meta, Gemini) are stored only in n8n credentials.
+
+## Workflows
+
+- Edit `scripts/make-templates.mjs` (not the JSON), then `node scripts/make-templates.mjs` → `workflows/src/`.
+- `node scripts/deploy.mjs` builds `dist/` (tested `lib/` pasted into the Code nodes) and uploads/publishes the 3 workflows. It needs `N8N_API_KEY` plus the IDs in `.env` (credential IDs, GHL location/pipeline/stage IDs, Meta dataset, test code).
+- n8n credentials (all **Header Auth**, `Authorization: Bearer <token>`, except the database): `Supabase demo` (Postgres, SSL require + ignore certificate), `GHL clinic`, `GHL store`, `Meta CAPI`, `Gemini`.
+
+## One-time GoHighLevel setup per client sub-account
+
+- Private Integration "n8n demo" with View/Edit Contacts and View/Edit Opportunities.
+- Pipeline "Demo leads" with stages New lead → Consultation booked (clinic) / Ordered (store). The tokens can't create pipelines.
+- Settings → Business Profile → **Allow Duplicate Contact** on, otherwise the "duplicates" test can't reach the CRM.
+
+## External APIs used
+
+| Call | Endpoint |
+|---|---|
+| Save a lead | `POST https://services.leadconnectorhq.com/contacts/` (header `Version: 2021-07-28`; tags `demo`, `run:<runId>`, `created:<epoch ms>`) |
+| Save a booking/order | `POST /opportunities/` (status `won`, or `lost` when cancelled; `monetaryValue`) |
+| Find demo contacts older than 7 days | `POST /contacts/search` (tag filter + `dateAdded` range, oldest first) |
+| Delete them | `DELETE /contacts/<id>` (GoHighLevel removes their deals too) |
+| Conversions | `POST https://graph.facebook.com/v23.0/<dataset>/events` with `test_event_code` |
+| AI summary | `POST https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, model `gemini-flash-latest`, strict JSON schema |
+
+GoHighLevel's search lags a few seconds behind new contacts, so a run builds its report from the records GoHighLevel returns when they're saved, not from a search.
