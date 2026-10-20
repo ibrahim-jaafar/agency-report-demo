@@ -5,7 +5,7 @@ import { generateLeads } from '../lib/leads.js';
 import { simulateSpend } from '../lib/spend.js';
 import { computeKpis } from '../lib/kpis.js';
 import { runChecks } from '../lib/checks.js';
-import { AI_SCHEMA, buildAiInput, validateAiOutput, templateSummary } from '../lib/ai.js';
+import { AI_SCHEMA, buildAiInput, validateAiOutput, templateDraft, templateSummary } from '../lib/ai.js';
 
 const W = new Date('2026-10-12T00:00:00Z');
 const NAMES = { clinic: 'Lumière Skin Clinic', store: 'Northwind Home' };
@@ -32,8 +32,8 @@ const input = buildAiInput([
 const good = {
   overview: 'Both clients are on track; the clinic needs a source clean-up.',
   clients: [
-    { client: 'clinic', headline: '58 leads and 14 booked consultations', summary: 'Leads rose 16% to 58 at $24.80 each. Booking rate was 24.1%.', warnings_explained: ['3 leads have no source.'], next_steps: ['Fix lead source tagging.'] },
-    { client: 'store', headline: '$4,820 revenue from 12 orders', summary: 'ROAS was 3.21 on $1,500 of spend.', warnings_explained: [], next_steps: [] },
+    { client: 'clinic', headline: '{leads} leads and {bookings} booked consultations', summary: 'Leads were {leads_change} on the previous report, at {costPerLead} each. Booking rate was {bookingRate}.', warnings_explained: ['{missing_source_count} leads have no source.'], next_steps: ['Fix lead source tagging.'] },
+    { client: 'store', headline: '{revenue} revenue from {orders} orders', summary: 'Return on ad spend was {roas} on {spend} of spend.', warnings_explained: [], next_steps: [] },
   ],
 };
 
@@ -55,9 +55,25 @@ test('input includes % changes vs previous, null when previous is missing or zer
   assert.equal(z.clients[0].changes.leads, null);
 });
 
-test('accepts a correct answer, as object or JSON string', () => {
-  assert.equal(validateAiOutput(good, input).ok, true);
+test('input lists each placeholder with the value the reader will see', () => {
+  const p = input.clients[0].placeholders;
+  assert.equal(p.leads, '58');
+  assert.equal(p.costPerLead, '$24.80');
+  assert.equal(p.bookingRate, '24.1%');
+  assert.equal(p.leads_change, 'up 16%');
+  assert.equal(p.costPerLead_change, 'down 1%');
+  assert.equal(p.missing_source_count, '3');
+  assert.equal(input.clients[1].placeholders.revenue, '$4,820.00');
+  assert.ok(!('leads_change' in input.clients[1].placeholders), 'no previous report, so no change');
+});
+
+test('accepts a correct answer, as object or JSON string, and fills in the real numbers', () => {
+  const r = validateAiOutput(good, input);
+  assert.equal(r.ok, true);
   assert.equal(validateAiOutput(JSON.stringify(good), input).ok, true);
+  assert.equal(r.value.clients[0].headline, '58 leads and 14 booked consultations');
+  assert.equal(r.value.clients[0].summary, 'Leads were up 16% on the previous report, at $24.80 each. Booking rate was 24.1%.');
+  assert.equal(r.value.clients[1].headline, '$4,820.00 revenue from 12 orders');
 });
 
 test('rejects invalid JSON, prose, missing keys, extra keys, wrong client count, duplicate clients', () => {
@@ -74,27 +90,56 @@ test('rejects invalid JSON, prose, missing keys, extra keys, wrong client count,
   for (const b of bad) assert.equal(validateAiOutput(b, input).ok, false, JSON.stringify(b)?.slice(0, 80));
 });
 
-test('rejects a number that is not in the data', () => {
+test('rejects any number the AI types itself, even a correct one', () => {
+  for (const text of ['Leads rose to 999.', 'There were 58 leads.', 'Cost per lead was $24.80.']) {
+    const o = structuredClone(good);
+    o.clients[0].summary = text;
+    const r = validateAiOutput(o, input);
+    assert.equal(r.ok, false, text);
+    assert.match(r.errors.join(' '), /types a number/);
+  }
   const o = structuredClone(good);
-  o.clients[0].summary = 'Leads rose to 999.';
-  const r = validateAiOutput(o, input);
-  assert.equal(r.ok, false);
-  assert.match(r.errors.join(' '), /999/);
+  o.overview = 'Both clients had {leads} leads.';
+  assert.equal(validateAiOutput(o, input).ok, false, 'the overview has no placeholders');
 });
 
-test('allows rounded numbers and rates written as percentages', () => {
+test('length limits apply to the text the reader sees, not to the placeholders', () => {
   const o = structuredClone(good);
-  o.clients[0].summary = 'Cost per booking was about $89, cost per lead $24.8, booking rate 24%.';
+  o.clients[0].summary = 'Cost per booking was {costPerBooking_change} on the previous report. '.repeat(9); // 621 characters as written, under 600 filled
   assert.equal(validateAiOutput(o, input).ok, true);
+  o.clients[0].summary = 'Cost per lead was {costPerLead}, a good week. '.repeat(16); // over 600 filled
+  assert.match(validateAiOutput(o, input).errors.join(' '), /too long/);
 });
 
-test('template is always valid', () => {
+test('rejects unknown placeholders, and ones with no value this week', () => {
+  for (const [i, text] of [[0, 'Profit was {profit}.'], [1, 'Revenue was {revenue_change}.'], [0, 'Revenue was {revenue}.']]) {
+    const o = structuredClone(good);
+    o.clients[i].summary = text;
+    const r = validateAiOutput(o, input);
+    assert.equal(r.ok, false, text);
+    assert.match(r.errors.join(' '), /has no value/);
+  }
+});
+
+test('rejects up/down words next to a change, which already says it', () => {
+  for (const text of ['Leads rose {leads_change}.', 'Leads fell by {leads_change}.', 'Leads were down {leads_change}.']) {
+    const o = structuredClone(good);
+    o.clients[0].summary = text;
+    assert.equal(validateAiOutput(o, input).ok, false, text);
+  }
+});
+
+test('template follows the same placeholder rules, for every kind of week', () => {
   for (let s = 0; s < 40; s++) for (const p of [[], ['edge_cases'], ['missing_source', 'duplicates', 'bad_totals', 'edge_cases']]) {
     const inp = sample(s, p);
-    const r = validateAiOutput(templateSummary(inp), inp);
+    const r = validateAiOutput(templateDraft(inp), inp);
     assert.equal(r.ok, true, `seed ${s} ${p}: ${r.errors}`);
+    const t = templateSummary(inp);
+    const texts = [t.overview, ...t.clients.flatMap(c => [c.headline, c.summary, ...c.warnings_explained, ...c.next_steps])].join(' ');
+    assert.ok(!/[{}]|NaN|Infinity|null|undefined/.test(texts), `seed ${s} ${p}: ${texts}`);
   }
-  assert.equal(validateAiOutput(templateSummary(input), input).ok, true);
+  assert.equal(validateAiOutput(templateDraft(input), input).ok, true);
+  assert.deepEqual(templateSummary(input).clients[0].warnings_explained, [input.clients[0].warnings[0].message]);
 });
 
 test('template says "no leads yet" instead of printing nothing-numbers', () => {

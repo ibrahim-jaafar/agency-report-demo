@@ -7,13 +7,14 @@ A weekly marketing report built with n8n: leads from GoHighLevel, conversions se
 - **Live:** the n8n workflow (Render), the run history (Supabase), the leads and deals saved in a GoHighLevel sandbox, the conversions sent to Meta's Conversions API (a demo dataset with no ads; Meta treats them as normal events unless its Test Events tab is open), the data checks and the Gemini summary.
 - **Made up:** the two clients, their leads, the ad spend (simulated per campaign) and the mistakes a visitor chooses.
 - **Limits:** one run at a time, one a minute, 50 a day. Gemini's free tier allows 20 requests a day per model; each run tries Flash and Flash-Lite at once, so about 20 runs a day get an AI summary and later runs use the template.
+- **AI summary:** the AI never types a number. It writes placeholders such as `{costPerLead}` or `{leads_change}`, and code puts in the real values (`$22.34`, `up 20%`), so a number in the summary can't be wrong. An answer is refused if it types a digit, uses a placeholder that doesn't exist or has no value this week, writes "rose" or "fell" next to a change (the change already says up or down), or is too long once filled in. The template summary uses the same placeholders and the same check.
 - **GoHighLevel limit:** our sandbox token allows 25 requests per 10 seconds per sub-account (its `X-RateLimit-*` headers say so; the docs say 100) and 10,000 a day. GoHighLevel has no bulk create for contacts or deals, so a run sends one request per record, 2 a second. Anything refused (429) is sent once more after a 10-second pause.
 - **Cleanup:** after the report is saved, each run deletes up to 25 demo contacts older than 7 days per sub-account (their deals go with them). It runs there and not on a schedule because the free server sleeps.
 - When something looks wrong, see [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Code
 
-- `lib/`: the logic (scenario, leads, spend, KPIs, checks, Meta events, AI input/validation, report). No dependencies.
+- `lib/`: the logic (scenario, leads, spend, KPIs, checks, Meta events, AI input, placeholders and their check, report). No dependencies.
 - `npm test`: runs the tests (`node --test`).
 - `node --test agency-demo/app.test.mjs` (in the portfolio repo): tests the demo page helpers.
 - `npm run site`: copies `lib/` into the portfolio's `agency-demo/lib/`.

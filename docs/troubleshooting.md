@@ -9,7 +9,7 @@ This guide is for the account manager who reads the report before it goes to a c
   - Orange: the data has a problem. Read the warnings on the card before sending anything.
   - Red: a step failed, so the numbers may be incomplete. Don't send this report.
 - **"Partial report"** under the summary means a step failed and the report was built without it.
-- **"This summary was written by the template"** means the AI's answer was refused or the AI didn't answer. The numbers are still correct; only the wording is plainer.
+- **"This summary was written by the template"** means the AI's answer was refused or the AI didn't answer. The numbers are still correct either way (code fills them in for the AI and the template); only the wording is plainer.
 - **The workflow strip** shows each step: green is done, orange is done with a warning, red failed (its reason is written under it), and grey "Stopped" means the run ended before reaching that step.
 
 ## What each warning means and what to do
