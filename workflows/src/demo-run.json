@@ -262,7 +262,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Clinic: contacts').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\n// pairedItem says which request a reply answers (a paged read gives several replies per request)\nconst sent = $('Clinic: contacts').all().map(i => i.json);\nconst seen = new Set();\nreturn $input.all().flatMap((it, k) => { const i = it.pairedItem?.item ?? k; if (it.json.statusCode !== 429 || seen.has(i)) return []; seen.add(i); return [{ json: { ...sent[i], i } }]; });"
       },
       "alwaysOutputData": true
     },
@@ -438,7 +438,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Store: contacts').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\n// pairedItem says which request a reply answers (a paged read gives several replies per request)\nconst sent = $('Store: contacts').all().map(i => i.json);\nconst seen = new Set();\nreturn $input.all().flatMap((it, k) => { const i = it.pairedItem?.item ?? k; if (it.json.statusCode !== 429 || seen.has(i)) return []; seen.add(i); return [{ json: { ...sent[i], i } }]; });"
       },
       "alwaysOutputData": true
     },
@@ -614,7 +614,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Clinic: deals').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\n// pairedItem says which request a reply answers (a paged read gives several replies per request)\nconst sent = $('Clinic: deals').all().map(i => i.json);\nconst seen = new Set();\nreturn $input.all().flatMap((it, k) => { const i = it.pairedItem?.item ?? k; if (it.json.statusCode !== 429 || seen.has(i)) return []; seen.add(i); return [{ json: { ...sent[i], i } }]; });"
       },
       "alwaysOutputData": true
     },
@@ -790,7 +790,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Store: deals').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\n// pairedItem says which request a reply answers (a paged read gives several replies per request)\nconst sent = $('Store: deals').all().map(i => i.json);\nconst seen = new Set();\nreturn $input.all().flatMap((it, k) => { const i = it.pairedItem?.item ?? k; if (it.json.statusCode !== 429 || seen.has(i)) return []; seen.add(i); return [{ json: { ...sent[i], i } }]; });"
       },
       "alwaysOutputData": true
     },
@@ -903,7 +903,179 @@
         -300
       ],
       "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };\n// The fake customers are in GoHighLevel now. Note what it refused, then hand over to the weekly report,\n// which reads GoHighLevel the way it would for a real client.\nconst plan = $('Plan run').first().json;\nconst rng = makeRng(plan.seed + 1);\nlet steps = $('Decide').first().json.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nlet ghlStatus = 'done'; const ghlNotes = [], spend = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = answers(b); return x.map((s, i) => [s, y[i] || {}]); };\n  let total = 0, failed = 0;\n  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) { if (s.kind !== 'contact') continue; total++; if (!(r.statusCode < 300 && r.body?.contact)) failed++; }\n  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) { if (s.kind !== 'deal') continue; total++; if (!(r.statusCode < 300 && r.body?.opportunity)) failed++; }\n  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }\n  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }\n  // stands in for the ad platform's spend report (Meta's Insights API for a real client)\n  spend[client] = simulateSpend(client, plan.leads[client], plan.problems, rng);\n}\nsteps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);\n// problems: the mistakes the visitor picked (empty for a real client). select: which contacts belong to this report.\nreturn [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, steps, spend, select: { tag: `run:${plan.runId}` } } }];"
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };\n// The fake customers are in GoHighLevel now. Note what it refused, then hand over to the weekly report,\n// which reads GoHighLevel the way it would for a real client.\nconst plan = $('Plan run').first().json;\nconst rng = makeRng(plan.seed + 1);\nlet steps = $('Decide').first().json.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nlet ghlStatus = 'done'; const ghlNotes = [], spend = {}, saved = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = answers(b); return x.map((s, i) => [s, y[i] || {}]); };\n  let total = 0, failed = 0;\n  saved[client] = 0;\n  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) { if (s.kind !== 'contact') continue; total++; if (!(r.statusCode < 300 && r.body?.contact)) failed++; else saved[client]++; }\n  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) { if (s.kind !== 'deal') continue; total++; if (!(r.statusCode < 300 && r.body?.opportunity)) failed++; }\n  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }\n  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }\n  // stands in for the ad platform's spend report (Meta's Insights API for a real client)\n  spend[client] = simulateSpend(client, plan.leads[client], plan.problems, rng);\n}\nsteps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);\n// problems: the mistakes the visitor picked (empty for a real client). select: which contacts belong to this report.\nreturn [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, steps, spend, select: { tag: `run:${plan.runId}` }, saved } }];"
+      }
+    },
+    {
+      "id": "09e574ec-7798-b796-0036-9dafd6f74b27",
+      "name": "Clinic: count",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7040,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { req: { method: 'POST', url: 'https://services.leadconnectorhq.com/contacts/search', body: { locationId: 'lX1GDRcqD985tKgOM4I3', pageLimit: 1, filters: [{ field: 'tags', operator: 'eq', value: $('Hand over').first().json.select.tag }] } } } }];"
+      }
+    },
+    {
+      "id": "4d30fe24-c3a1-2377-4533-06f3ffcb0f2b",
+      "name": "GHL clinic: count",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7260,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "96e8feb9-4510-6ea0-454c-7767743d0356",
+      "name": "Store: count",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        7480,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: { clinicFound: $json.body?.total ?? 0, req: { method: 'POST', url: 'https://services.leadconnectorhq.com/contacts/search', body: { locationId: 'VxYMePPrdwUBRt79Z4wC', pageLimit: 1, filters: [{ field: 'tags', operator: 'eq', value: $('Hand over').first().json.select.tag }] } } } }];"
+      }
+    },
+    {
+      "id": "2dfa7ec7-5e24-def6-567c-a30f2b869479",
+      "name": "GHL store: count",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        7700,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "1718c318-863c-0d76-c9f7-ea615e96fca6",
+      "name": "All searchable?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        7920,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "096ddd72-8502-bdda-9823-c38096ca4417",
+              "leftValue": "={{ ($('Store: count').item.json.clinicFound >= $('Hand over').first().json.saved.clinic && ($json.body?.total ?? 0) >= $('Hand over').first().json.saved.store) || $runIndex >= 11 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "03448c3a-1723-60da-32a7-d7a1722484a9",
+      "name": "Pass it on",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        8140,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "return [{ json: $('Hand over').first().json }];"
       }
     },
     {
@@ -912,7 +1084,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        7040,
+        8360,
         -300
       ],
       "parameters": {
@@ -935,6 +1107,22 @@
           "waitForSubWorkflow": true
         }
       }
+    },
+    {
+      "id": "90296c95-4b49-1de9-682e-d7bb9f971283",
+      "name": "Look again soon",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        7920,
+        -100
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "webhookId": "44748e98-faa8-26c1-2e78-be3c246107b0"
     },
     {
       "id": "a9102b5d-641d-a06d-3751-a65e8b6bc443",
@@ -1589,6 +1777,90 @@
       ]
     },
     "Hand over": {
+      "main": [
+        [
+          {
+            "node": "Clinic: count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Look again soon": {
+      "main": [
+        [
+          {
+            "node": "Clinic: count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic: count": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: count": {
+      "main": [
+        [
+          {
+            "node": "Store: count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store: count": {
+      "main": [
+        [
+          {
+            "node": "GHL store: count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: count": {
+      "main": [
+        [
+          {
+            "node": "All searchable?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "All searchable?": {
+      "main": [
+        [
+          {
+            "node": "Pass it on",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Look again soon",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pass it on": {
       "main": [
         [
           {

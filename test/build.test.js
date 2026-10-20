@@ -47,8 +47,8 @@ test('lib is injected byte for byte (no $-pattern rewriting)', () => {
 });
 
 test('answers() puts retried GoHighLevel replies back in their place', () => {
-  const wf = JSON.parse(readFileSync(new URL('../workflows/src/weekly-report.json', import.meta.url), 'utf8'));
-  const line = wf.nodes.find(n => n.name === 'CRM data').parameters.jsCode.split('\n').find(l => l.startsWith('const answers'));
+  const wf = JSON.parse(readFileSync(new URL('../workflows/src/demo-run.json', import.meta.url), 'utf8'));
+  const line = wf.nodes.find(n => n.name === 'Hand over').parameters.jsCode.split('\n').find(l => l.startsWith('const answers'));
   const j = o => ({ json: o });
   const nodes = {
     N: [j({ statusCode: 201, a: 0 }), j({ statusCode: 429 }), j({ statusCode: 201, a: 2 }), j({ statusCode: 429 })],
@@ -62,6 +62,29 @@ test('answers() puts retried GoHighLevel replies back in their place', () => {
   assert.deepEqual(answers('N').map(r => r.a ?? r.statusCode), [0, 429, 2, 429]);
 });
 
+test("pages() groups paged replies by request and puts a retried request's pages in its place", () => {
+  const wf = JSON.parse(readFileSync(new URL('../workflows/src/weekly-report.json', import.meta.url), 'utf8'));
+  const line = wf.nodes.find(n => n.name === 'CRM data').parameters.jsCode.split('\n').find(l => l.startsWith('const pages'));
+  const j = (o, item) => ({ json: o, pairedItem: { item } });
+  const nodes = {
+    N: [j({ p: 'c1' }, 0), j({ p: 'd1' }, 1), j({ p: 'c2' }, 0), j({ statusCode: 429 }, 1)],
+    'N (refused)': [j({ i: 1 }, 0)],
+    'N (retry)': [j({ p: 'd1' }, 0), j({ p: 'd2' }, 0)],
+  };
+  const $ = n => ({ all: () => nodes[n], isExecuted: n in nodes });
+  const pages = new Function('$', `${line}\nreturn pages;`)($);
+  assert.deepEqual(pages('N').map(r => r.map(x => x.p ?? x.statusCode)), [['c1', 'c2'], ['d1', 'd2']]);
+  delete nodes['N (retry)'];
+  assert.deepEqual(pages('N').map(r => r.map(x => x.p ?? x.statusCode)), [['c1', 'c2'], ['d1', 429]]);
+});
+
+test("only the report's reads page through GoHighLevel; saves send one request each", () => {
+  const wf = name => JSON.parse(readFileSync(new URL(`../workflows/src/${name}.json`, import.meta.url), 'utf8'));
+  const paged = w => wf(w).nodes.filter(n => n.parameters.options?.pagination).map(n => n.name);
+  assert.deepEqual(paged('weekly-report'), ['GHL clinic: read', 'GHL clinic: read (retry)', 'GHL store: read', 'GHL store: read (retry)']);
+  assert.deepEqual(paged('demo-run'), []);
+});
+
 test('the weekly report only reads GoHighLevel, and the demo hands over to it', () => {
   const wf = name => JSON.parse(readFileSync(new URL(`../workflows/src/${name}.json`, import.meta.url), 'utf8'));
   const report = wf('weekly-report'), demo = wf('demo-run');
@@ -71,5 +94,11 @@ test('the weekly report only reads GoHighLevel, and the demo hands over to it', 
   const call = demo.nodes.find(n => n.type === 'n8n-nodes-base.executeWorkflow');
   assert.equal(call.parameters.workflowId.value, 'weekly-report');
   assert.equal(call.parameters.options.waitForSubWorkflow, true, 'cleanup must wait for the report');
+  // GoHighLevel's search lags behind saves, so the demo hands over only once search finds this run's contacts
+  const next = n => demo.connections[n].main.map(o => o.map(c => c.node));
+  assert.deepEqual(next('Hand over'), [['Clinic: count']]);
+  assert.deepEqual(next('All searchable?'), [['Pass it on'], ['Look again soon']]);
+  assert.deepEqual(next('Look again soon'), [['Clinic: count']]);
+  assert.deepEqual(next('Pass it on'), [['Run the weekly report']]);
   for (const n of ['Meta: send conversions', 'AI: write summary', 'Checks']) assert.ok(!demo.nodes.some(x => x.name === n) && report.nodes.some(x => x.name === n), n);
 });

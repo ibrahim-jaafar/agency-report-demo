@@ -24,7 +24,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// Lumière Skin Clinic: this report's contacts, and the newest deals in its pipeline (matched to those contacts next).\nconst job = $('Start report').first().json;\nconst G = 'https://services.leadconnectorhq.com', L = 'lX1GDRcqD985tKgOM4I3', P = 'e3YMhd6OJWtcGA9MFPnx';\nreturn [\n  { json: { kind: 'contacts', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: L, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: job.select.tag }] } } } },\n  // ponytail: first page only. One run at a time and newest first put this run's deals on it; real clients would page through meta.nextPageUrl\n  { json: { kind: 'deals', req: { method: 'GET', url: `${G}/opportunities/search?location_id=${L}&pipeline_id=${P}&limit=100` } } },\n];"
+        "jsCode": "// Lumière Skin Clinic: this report's contacts, and the newest deals in its pipeline (matched to those contacts next).\nconst job = $('Start report').first().json;\nconst G = 'https://services.leadconnectorhq.com', L = 'lX1GDRcqD985tKgOM4I3', P = 'e3YMhd6OJWtcGA9MFPnx';\nreturn [\n  { json: { kind: 'contacts', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: L, page: 1, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: job.select.tag }] } } } },\n  // newest first; a deal is never older than its contact, so paging stops once it reaches back before the week\n  { json: { kind: 'deals', stopBefore: Date.parse(job.weekStart), req: { method: 'GET', url: `${G}/opportunities/search?location_id=${L}&pipeline_id=${P}&limit=100` } } },\n];"
       }
     },
     {
@@ -66,6 +66,35 @@
               "batchSize": 2,
               "batchInterval": 1000
             }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  },
+                  {
+                    "type": "qs",
+                    "name": "startAfter",
+                    "value": "={{ $response.body.meta?.startAfter }}"
+                  },
+                  {
+                    "type": "qs",
+                    "name": "startAfterId",
+                    "value": "={{ $response.body.meta?.startAfterId }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.statusCode !== 200 || ($response.body.contacts ?? $response.body.opportunities ?? []).length < 100 || Date.parse($response.body.opportunities?.at(-1)?.createdAt) < ($json.stopBefore ?? 0) }}",
+              "limitPagesFetched": true,
+              "maxRequests": 100,
+              "requestInterval": 1000
+            }
           }
         }
       },
@@ -87,7 +116,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Clinic: read').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\n// pairedItem says which request a reply answers (a paged read gives several replies per request)\nconst sent = $('Clinic: read').all().map(i => i.json);\nconst seen = new Set();\nreturn $input.all().flatMap((it, k) => { const i = it.pairedItem?.item ?? k; if (it.json.statusCode !== 429 || seen.has(i)) return []; seen.add(i); return [{ json: { ...sent[i], i } }]; });"
       },
       "alwaysOutputData": true
     },
@@ -179,6 +208,35 @@
               "batchSize": 2,
               "batchInterval": 1000
             }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  },
+                  {
+                    "type": "qs",
+                    "name": "startAfter",
+                    "value": "={{ $response.body.meta?.startAfter }}"
+                  },
+                  {
+                    "type": "qs",
+                    "name": "startAfterId",
+                    "value": "={{ $response.body.meta?.startAfterId }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.statusCode !== 200 || ($response.body.contacts ?? $response.body.opportunities ?? []).length < 100 || Date.parse($response.body.opportunities?.at(-1)?.createdAt) < ($json.stopBefore ?? 0) }}",
+              "limitPagesFetched": true,
+              "maxRequests": 100,
+              "requestInterval": 1000
+            }
           }
         }
       },
@@ -200,7 +258,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// Northwind Home: this report's contacts, and the newest deals in its pipeline (matched to those contacts next).\nconst job = $('Start report').first().json;\nconst G = 'https://services.leadconnectorhq.com', L = 'VxYMePPrdwUBRt79Z4wC', P = 'F1gLtHkYfr2SF8ulCrzs';\nreturn [\n  { json: { kind: 'contacts', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: L, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: job.select.tag }] } } } },\n  // ponytail: first page only. One run at a time and newest first put this run's deals on it; real clients would page through meta.nextPageUrl\n  { json: { kind: 'deals', req: { method: 'GET', url: `${G}/opportunities/search?location_id=${L}&pipeline_id=${P}&limit=100` } } },\n];"
+        "jsCode": "// Northwind Home: this report's contacts, and the newest deals in its pipeline (matched to those contacts next).\nconst job = $('Start report').first().json;\nconst G = 'https://services.leadconnectorhq.com', L = 'VxYMePPrdwUBRt79Z4wC', P = 'F1gLtHkYfr2SF8ulCrzs';\nreturn [\n  { json: { kind: 'contacts', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: L, page: 1, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: job.select.tag }] } } } },\n  // newest first; a deal is never older than its contact, so paging stops once it reaches back before the week\n  { json: { kind: 'deals', stopBefore: Date.parse(job.weekStart), req: { method: 'GET', url: `${G}/opportunities/search?location_id=${L}&pipeline_id=${P}&limit=100` } } },\n];"
       }
     },
     {
@@ -242,6 +300,35 @@
               "batchSize": 2,
               "batchInterval": 1000
             }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  },
+                  {
+                    "type": "qs",
+                    "name": "startAfter",
+                    "value": "={{ $response.body.meta?.startAfter }}"
+                  },
+                  {
+                    "type": "qs",
+                    "name": "startAfterId",
+                    "value": "={{ $response.body.meta?.startAfterId }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.statusCode !== 200 || ($response.body.contacts ?? $response.body.opportunities ?? []).length < 100 || Date.parse($response.body.opportunities?.at(-1)?.createdAt) < ($json.stopBefore ?? 0) }}",
+              "limitPagesFetched": true,
+              "maxRequests": 100,
+              "requestInterval": 1000
+            }
           }
         }
       },
@@ -263,7 +350,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Store: read').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\n// pairedItem says which request a reply answers (a paged read gives several replies per request)\nconst sent = $('Store: read').all().map(i => i.json);\nconst seen = new Set();\nreturn $input.all().flatMap((it, k) => { const i = it.pairedItem?.item ?? k; if (it.json.statusCode !== 429 || seen.has(i)) return []; seen.add(i); return [{ json: { ...sent[i], i } }]; });"
       },
       "alwaysOutputData": true
     },
@@ -355,6 +442,35 @@
               "batchSize": 2,
               "batchInterval": 1000
             }
+          },
+          "pagination": {
+            "pagination": {
+              "paginationMode": "updateAParameterInEachRequest",
+              "parameters": {
+                "parameters": [
+                  {
+                    "type": "body",
+                    "name": "page",
+                    "value": "={{ $pageCount + 1 }}"
+                  },
+                  {
+                    "type": "qs",
+                    "name": "startAfter",
+                    "value": "={{ $response.body.meta?.startAfter }}"
+                  },
+                  {
+                    "type": "qs",
+                    "name": "startAfterId",
+                    "value": "={{ $response.body.meta?.startAfterId }}"
+                  }
+                ]
+              },
+              "paginationCompleteWhen": "other",
+              "completeExpression": "={{ $response.statusCode !== 200 || ($response.body.contacts ?? $response.body.opportunities ?? []).length < 100 || Date.parse($response.body.opportunities?.at(-1)?.createdAt) < ($json.stopBefore ?? 0) }}",
+              "limitPagesFetched": true,
+              "maxRequests": 100,
+              "requestInterval": 1000
+            }
           }
         }
       },
@@ -376,7 +492,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };\n// The report uses what GoHighLevel has, read back from it, like it would for a real client.\nconst job = $('Start report').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nlet steps = job.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nconst readNotes = [], out = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const got = answers(`GHL ${client}: read`);\n  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || {}]));\n  const contacts = r.contacts?.statusCode === 200 ? r.contacts.body?.contacts || [] : null;\n  const deals = r.deals?.statusCode === 200 ? r.deals.body?.opportunities || [] : null;\n  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);\n  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));\n  const leads = (contacts || []).map(c => {\n    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded\n    const d = dealOf.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  const meta = buildMetaEvents(client, leads, job.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend: job.spend[client], ...meta };\n}\nif (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, clients: out, steps } }];"
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst pages = n => { const r = [], put = (items, at) => items.forEach((it, k) => (r[at(it.pairedItem?.item ?? k)] ??= []).push(it.json)); put($(n).all(), i => i); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); idx.forEach(i => { r[i] = []; }); put($(`${n} (retry)`).all(), k => idx[k]); } return r; };\n// The report uses what GoHighLevel has, read back from it, like it would for a real client.\nconst job = $('Start report').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nlet steps = job.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nconst readNotes = [], out = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const got = pages(`GHL ${client}: read`);\n  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || []]));\n  const c = joinPages(r.contacts, 'contacts', 100, 100), d = joinPages(r.deals, 'opportunities', 100, 100);\n  const contacts = c?.rows ?? null, deals = d?.rows ?? null;\n  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);\n  else if (c.more || d.more) readNotes.push(`${name}: more than 10000 records; only the first 10000 were read`);\n  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));\n  const leads = (contacts || []).map(c => {\n    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded\n    const d = dealOf.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  const meta = buildMetaEvents(client, leads, job.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend: job.spend[client], ...meta };\n}\nif (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, clients: out, steps } }];"
       }
     },
     {

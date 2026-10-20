@@ -52,16 +52,30 @@ const codeNode = (name, js, y) => ({ name, y, type: 'n8n-nodes-base.code', v: 2,
 const sql = (name, query, replacement, y, extra = {}) => ({ name, y, type: 'n8n-nodes-base.postgres', v: 2.5,
   params: { operation: 'executeQuery', query: code(query), options: replacement ? { queryReplacement: replacement } : {} }, extra: { credentials: PG, ...extra } });
 // One generic HTTP node: each input item carries its own request in json.req. Errors come back as items, never stop the run.
-const http = (name, creds, { headers = [], batch, timeout = 30000, y } = {}) => ({ name, y, type: 'n8n-nodes-base.httpRequest', v: 4.2,
+const http = (name, creds, { headers = [], batch, timeout = 30000, paging, y } = {}) => ({ name, y, type: 'n8n-nodes-base.httpRequest', v: 4.2,
   params: { method: '={{ $json.req.method }}', url: '={{ $json.req.url }}', authentication: 'genericCredentialType', genericAuthType: 'httpHeaderAuth',
     sendHeaders: headers.length > 0, headerParameters: { parameters: headers.map(([name, value]) => ({ name, value })) },
     sendBody: true, specifyBody: 'json', jsonBody: '={{ JSON.stringify($json.req.body ?? {}) }}',
-    options: { timeout, response: { response: { fullResponse: true, neverError: true } }, ...(batch ? { batching: { batch: { batchSize: batch, batchInterval: 1000 } } } : {}) } },
+    options: { timeout, response: { response: { fullResponse: true, neverError: true } }, ...(batch ? { batching: { batch: { batchSize: batch, batchInterval: 1000 } } } : {}),
+      ...(paging ? { pagination: { pagination: paging } } : {}) } },
   extra: { credentials: creds, onError: 'continueRegularOutput' } });
 // Our GoHighLevel token allows 25 requests per 10 s per sub-account (its X-RateLimit headers say so; the docs say 100).
 // 2 a second stays under that. GHL_BATCH=25 is only for testing the retry below.
 const GHL_BATCH = Number(process.env.GHL_BATCH) || 2;
-const ghlHttp = (c, what, y) => http(`GHL ${c}: ${what}`, header(...CLIENTS[c].cred), { headers: [['Version', '2021-07-28']], batch: GHL_BATCH, y });
+// Reads page through long lists (n8n's own paging; each page comes out as its own item, tagged with its request).
+// Contacts take a page number in the body, deals a cursor from the last reply's meta; each side ignores the other's.
+// Stops on an error, a short page, or (deals, newest first) a page that reaches back before the report's week.
+// GHL_PAGE (default 100, GoHighLevel's most) is smaller only to test paging with the demo's few leads.
+const PAGE = Number(process.env.GHL_PAGE) || 100, MAX_PAGES = 100;
+const READ_PAGING = { paginationMode: 'updateAParameterInEachRequest', parameters: { parameters: [
+    { type: 'body', name: 'page', value: '={{ $pageCount + 1 }}' },
+    { type: 'qs', name: 'startAfter', value: '={{ $response.body.meta?.startAfter }}' },
+    { type: 'qs', name: 'startAfterId', value: '={{ $response.body.meta?.startAfterId }}' }] },
+  paginationCompleteWhen: 'other',
+  completeExpression: `={{ $response.statusCode !== 200 || ($response.body.contacts ?? $response.body.opportunities ?? []).length < ${PAGE} || Date.parse($response.body.opportunities?.at(-1)?.createdAt) < ($json.stopBefore ?? 0) }}`,
+  // the two reads page side by side, so 1 s each keeps us at 2 requests a second (GHL_BATCH=25 speeds this up too, to test the retry)
+  limitPagesFetched: true, maxRequests: MAX_PAGES, requestInterval: Math.round(2000 / GHL_BATCH) };
+const ghlHttp = (c, what, y) => http(`GHL ${c}: ${what}`, header(...CLIENTS[c].cred), { headers: [['Version', '2021-07-28']], batch: GHL_BATCH, paging: what === 'read' ? READ_PAGING : undefined, y });
 const ifTrue = (expr, id) => ({ conditions: { options: { caseSensitive: true, leftValue: '', typeValidation: 'loose' },
   conditions: [{ id, leftValue: expr, rightValue: '', operator: { type: 'boolean', operation: 'true', singleValue: true } }], combinator: 'and' }, options: {} });
 // Save to GoHighLevel; anything refused for the rate limit (429) is sent once more after a 10-second pause.
@@ -72,8 +86,10 @@ const ghlSave = (c, what, from, y) => {
     ghlHttp(c, what, y),
     { ...codeNode(`${n} (refused)`, [
       '// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it',
+      '// pairedItem says which request a reply answers (a paged read gives several replies per request)',
       `const sent = $('${from}').all().map(i => i.json);`,
-      'return $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);'], y), extra: { alwaysOutputData: true } },
+      'const seen = new Set();',
+      'return $input.all().flatMap((it, k) => { const i = it.pairedItem?.item ?? k; if (it.json.statusCode !== 429 || seen.has(i)) return []; seen.add(i); return [{ json: { ...sent[i], i } }]; });'], y), extra: { alwaysOutputData: true } },
     { name: `${n} (any refused?)`, y, type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ !!$json.req }}', sid(`${n} refused`)) },
     { name: `${n} (pause)`, y, type: 'n8n-nodes-base.wait', v: 1.1, params: { resume: 'timeInterval', amount: 10, unit: 'seconds' }, extra: { webhookId: sid(`${n} pause`) } },
     { ...ghlHttp(c, what, y), name: `${n} (retry)` },
@@ -82,6 +98,8 @@ const ghlSave = (c, what, from, y) => {
 const afterSave = (step, c, what) => ({ ...step, alsoFrom: [`GHL ${c}: ${what} (any refused?)`, 1] });
 // GoHighLevel's answers in request order, with retried answers put back in their place.
 const ANSWERS = "const answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };";
+// The same for a paged read: every request's pages, in request order, with a retried request's pages put in its place.
+const PAGES = "const pages = n => { const r = [], put = (items, at) => items.forEach((it, k) => (r[at(it.pairedItem?.item ?? k)] ??= []).push(it.json)); put($(n).all(), i => i); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); idx.forEach(i => { r[i] = []; }); put($(`${n} (retry)`).all(), k => idx[k]); } return r; };";
 const GHL_TEST_FLOOD = Number(process.env.GHL_TEST_FLOOD) || 0; // ponytail: test only, extra lookups that push a run over the rate limit
 const NOOP = ["// ponytail: one harmless lookup when there's nothing to save (n8n stops a branch with no items)",
   "if (!reqs.length) reqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });"];
@@ -121,6 +139,24 @@ const refuse = [
     "if (limit.reason === 'running') return [{ json: { code: 200, body: { runId: limit.runId, joined: true } } }];",
     'return [{ json: { code: 429, body: { reason: limit.reason, retryAfterSec: limit.retryAfterSec, latest: $input.first().json.latest ?? null } } }];'], 300),
   { name: 'Respond refused', y: 300, type: 'n8n-nodes-base.respondToWebhook', v: 1.1, params: { respondWith: 'json', responseBody: '={{ JSON.stringify($json.body) }}', options: { responseCode: '={{ $json.code }}' } } },
+];
+
+// How many of this run's contacts each client's search finds; checked every 5 s, at most CATCH_UP_TRIES times.
+const CATCH_UP_TRIES = 12;
+const countReq = c => `{ method: 'POST', url: '${GHL}/contacts/search', body: { locationId: '${CLIENTS[c].location}', pageLimit: 1, filters: [{ field: 'tags', operator: 'eq', value: $('Hand over').first().json.select.tag }] } }`;
+const catchUp = [
+  { ...codeNode('Clinic: count', [`return [{ json: { req: ${countReq('clinic')} } }];`], -300), alsoFrom: ['Look again soon', 0] },
+  ghlHttp('clinic', 'count', -300),
+  codeNode('Store: count', [`return [{ json: { clinicFound: $json.body?.total ?? 0, req: ${countReq('store')} } }];`], -300),
+  ghlHttp('store', 'count', -300),
+  { name: 'All searchable?', y: -300, type: 'n8n-nodes-base.if', v: 2, params: ifTrue(
+    `={{ ($('Store: count').item.json.clinicFound >= $('Hand over').first().json.saved.clinic && ($json.body?.total ?? 0) >= $('Hand over').first().json.saved.store) || $runIndex >= ${CATCH_UP_TRIES - 1} }}`, sid('all searchable')) },
+  // ponytail: after the last try the report runs anyway and shows what search found
+  codeNode('Pass it on', ["return [{ json: $('Hand over').first().json }];"], -300),
+];
+const catchUpLoop = [
+  { branch: ['All searchable?', 1], x: 7920 },
+  { name: 'Look again soon', y: -100, type: 'n8n-nodes-base.wait', v: 1.1, params: { resume: 'timeInterval', amount: 5, unit: 'seconds' }, extra: { webhookId: sid('look again') } },
 ];
 
 // ---------- the run (Task 12) ----------
@@ -215,11 +251,12 @@ const run = [
     'const rng = makeRng(plan.seed + 1);',
     "let steps = $('Decide').first().json.steps;",
     NAMES,
-    "let ghlStatus = 'done'; const ghlNotes = [], spend = {};",
+    "let ghlStatus = 'done'; const ghlNotes = [], spend = {}, saved = {};",
     'for (const [client, [label, name]] of Object.entries(NAMES)) {',
     "  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = answers(b); return x.map((s, i) => [s, y[i] || {}]); };",
     '  let total = 0, failed = 0;',
-    "  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) { if (s.kind !== 'contact') continue; total++; if (!(r.statusCode < 300 && r.body?.contact)) failed++; }",
+    "  saved[client] = 0;",
+    "  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) { if (s.kind !== 'contact') continue; total++; if (!(r.statusCode < 300 && r.body?.contact)) failed++; else saved[client]++; }",
     "  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) { if (s.kind !== 'deal') continue; total++; if (!(r.statusCode < 300 && r.body?.opportunity)) failed++; }",
     "  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }",
     "  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }",
@@ -228,7 +265,10 @@ const run = [
     '}',
     "steps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);",
     "// problems: the mistakes the visitor picked (empty for a real client). select: which contacts belong to this report.",
-    "return [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, steps, spend, select: { tag: `run:${plan.runId}` } } }];"], -300), 'store', 'save deals'),
+    "return [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, steps, spend, select: { tag: `run:${plan.runId}` }, saved } }];"], -300), 'store', 'save deals'),
+  // GoHighLevel's search finds new contacts only some time after they're saved (seen: 0 of 6 found 20 s later).
+  // So wait until search finds every contact this run saved, then hand over. Only the demo needs this: a real report runs days later.
+  ...catchUp,
   // waits for the report, so the cleanup below never deletes contacts the report is still reading
   { name: 'Run the weekly report', y: -300, type: 'n8n-nodes-base.executeWorkflow', v: 1.2, params: { source: 'database',
     workflowId: { __rl: true, mode: 'id', value: REPORT_ID }, mode: 'once',
@@ -242,9 +282,11 @@ const readCode = c => [
   "const job = $('Start report').first().json;",
   `const G = '${GHL}', L = '${CLIENTS[c].location}', P = '${CLIENTS[c].pipeline}';`,
   'return [',
-  "  { json: { kind: 'contacts', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: L, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: job.select.tag }] } } } },",
-  "  // ponytail: first page only. One run at a time and newest first put this run's deals on it; real clients would page through meta.nextPageUrl",
-  "  { json: { kind: 'deals', req: { method: 'GET', url: `${G}/opportunities/search?location_id=${L}&pipeline_id=${P}&limit=100` } } },",
+  // ponytail: test only, lookups ahead of the reads so the reads get refused and retried
+  ...(GHL_TEST_FLOOD ? [`  ...Array.from({ length: ${GHL_TEST_FLOOD} }, () => ({ json: { kind: 'noop', req: { method: 'POST', url: \`\${G}/contacts/search\`, body: { locationId: L, pageLimit: 1 } } } })),`] : []),
+  `  { json: { kind: 'contacts', req: { method: 'POST', url: \`\${G}/contacts/search\`, body: { locationId: L, page: 1, pageLimit: ${PAGE}, filters: [{ field: 'tags', operator: 'eq', value: job.select.tag }] } } } },`,
+  "  // newest first; a deal is never older than its contact, so paging stops once it reaches back before the week",
+  `  { json: { kind: 'deals', stopBefore: Date.parse(job.weekStart), req: { method: 'GET', url: \`\${G}/opportunities/search?location_id=\${L}&pipeline_id=\${P}&limit=${PAGE}\` } } },`,
   '];',
 ];
 
@@ -257,7 +299,7 @@ const report = [
   afterSave(codeNode('CRM data', [
     '/*@lib*/',
     ...STEP_HELPERS,
-    ANSWERS,
+    PAGES,
     "// The report uses what GoHighLevel has, read back from it, like it would for a real client.",
     "const job = $('Start report').first().json;",
     "const crypto = require('crypto');",
@@ -267,11 +309,12 @@ const report = [
     NAMES,
     'const readNotes = [], out = {};',
     'for (const [client, [label, name]] of Object.entries(NAMES)) {',
-    "  const got = answers(`GHL ${client}: read`);",
-    "  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || {}]));",
-    "  const contacts = r.contacts?.statusCode === 200 ? r.contacts.body?.contacts || [] : null;",
-    "  const deals = r.deals?.statusCode === 200 ? r.deals.body?.opportunities || [] : null;",
+    "  const got = pages(`GHL ${client}: read`);",
+    "  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || []]));",
+    `  const c = joinPages(r.contacts, 'contacts', ${MAX_PAGES}, ${PAGE}), d = joinPages(r.deals, 'opportunities', ${MAX_PAGES}, ${PAGE});`,
+    "  const contacts = c?.rows ?? null, deals = d?.rows ?? null;",
     "  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);",
+    `  else if (c.more || d.more) readNotes.push(\`\${name}: more than ${MAX_PAGES * PAGE} records; only the first ${MAX_PAGES * PAGE} were read\`);`,
     '  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));',
     '  const leads = (contacts || []).map(c => {',
     "    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded",
@@ -395,7 +438,7 @@ const cleanup = (c, y) => {
   ];
 };
 
-const demoRun = workflow('demo-run', [...start, ...refuse, ...run, ...cleanup('clinic', 600), ...cleanup('store', 800)]);
+const demoRun = workflow('demo-run', [...start, ...refuse, ...run, ...catchUpLoop, ...cleanup('clinic', 600), ...cleanup('store', 800)]);
 const weeklyReport = workflow('weekly-report', report);
 
 const demoStatus = workflow('demo-status', [

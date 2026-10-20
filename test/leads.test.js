@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeRng } from '../lib/rng.js';
-import { generateLeads, normalisePhone, normaliseEmail, inPeriod } from '../lib/leads.js';
+import { generateLeads, normalisePhone, normaliseEmail, inPeriod, joinPages } from '../lib/leads.js';
 
 const W = new Date('2026-10-12T00:00:00Z');
 const DAY = 864e5;
@@ -106,4 +106,14 @@ test('all problems together never crash and keep every edge case', () => {
     assert.ok(l.some(x => x.flags.includes('shared')), `seed ${s} ${c}`);
     if (c === 'store') assert.ok(l.some(x => x.flags.includes('outlier')));
   }
+});
+
+test('joinPages: joins pages, drops repeats, flags a cut-off list, refuses a failed page', () => {
+  const page = (...ids) => ({ statusCode: 200, body: { contacts: ids.map(id => ({ id })) } });
+  assert.deepEqual(joinPages([page('a', 'b'), page('b', 'c'), page('d')], 'contacts', 10, 2), { rows: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], more: false });
+  assert.equal(joinPages([page('a', 'b'), page('c', 'd')], 'contacts', 2, 2).more, true);
+  assert.equal(joinPages([page('a', 'b'), page('c')], 'contacts', 2, 2).more, false);
+  assert.equal(joinPages([page('a', 'b'), { statusCode: 429, body: {} }], 'contacts', 10, 2), null);
+  assert.equal(joinPages([], 'contacts', 10, 2), null);
+  assert.deepEqual(joinPages([{ statusCode: 200, body: {} }], 'contacts', 10, 2).rows, []);
 });
