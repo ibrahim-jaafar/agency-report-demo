@@ -5,7 +5,7 @@ import { generateLeads } from '../lib/leads.js';
 import { simulateSpend } from '../lib/spend.js';
 import { computeKpis } from '../lib/kpis.js';
 import { runChecks } from '../lib/checks.js';
-import { AI_SCHEMA, buildAiInput, validateAiOutput, pickAiAnswer, templateDraft, templateSummary } from '../lib/ai.js';
+import { AI_SCHEMA, LABELS, COUNT_LABELS, placeholderGuide, buildAiInput, validateAiOutput, pickAiAnswer, templateDraft, templateSummary } from '../lib/ai.js';
 
 const W = new Date('2026-10-12T00:00:00Z');
 const NAMES = { clinic: 'Lumière Skin Clinic', store: 'Northwind Home' };
@@ -32,7 +32,7 @@ const input = buildAiInput([
 const good = {
   overview: 'Both clients are on track; the clinic needs a source clean-up.',
   clients: [
-    { client: 'clinic', headline: '{leads} leads and {bookings} booked consultations', summary: 'Leads were {leads_change} on the previous report, at {costPerLead} each. Booking rate was {bookingRate}.', warnings_explained: ['{missing_source_count} leads have no source.'], next_steps: ['Fix lead source tagging.'] },
+    { client: 'clinic', headline: '{leads} leads and {bookings} booked consultations', summary: 'Leads were {leads_change} on the previous report, at {costPerLead} per lead. Booking rate was {bookingRate}.', warnings_explained: ['{missing_source_count} leads have no source.'], next_steps: ['Fix lead source tagging.'] },
     { client: 'store', headline: '{revenue} revenue from {orders} orders', summary: 'Return on ad spend was {roas} on {spend} of spend.', warnings_explained: [], next_steps: [] },
   ],
 };
@@ -72,7 +72,7 @@ test('accepts a correct answer, as object or JSON string, and fills in the real 
   assert.equal(r.ok, true);
   assert.equal(validateAiOutput(JSON.stringify(good), input).ok, true);
   assert.equal(r.value.clients[0].headline, '58 leads and 14 booked consultations');
-  assert.equal(r.value.clients[0].summary, 'Leads were up 16% on the previous report, at $24.80 each. Booking rate was 24.1%.');
+  assert.equal(r.value.clients[0].summary, 'Leads were up 16% on the previous report, at $24.80 per lead. Booking rate was 24.1%.');
   assert.equal(r.value.clients[1].headline, '$4,820.00 revenue from 12 orders');
 });
 
@@ -173,4 +173,40 @@ test('template uses singular words for one', () => {
   const text = JSON.stringify(t);
   for (const bad of ['1 orders', '1 leads', '1 booked consultations', '1 cancelled bookings', '1 cancelled orders']) assert.ok(!text.includes(bad), bad);
   assert.match(t.clients[1].headline, /from 1 order$/);
+});
+
+test('every number must sit next to its own label', () => {
+  const check = text => { const o = structuredClone(good); o.clients[0].summary = text; return validateAiOutput(o, input); };
+  for (const text of [
+    'Cost per booking was {costPerLead}.', // a real number under the wrong label
+    'Cost per lead was {leads}.', // a count right after a cost label
+    'Bookings came in at {leads} this week.',
+    'Return on ad spend was {spend}.',
+    'Leads came to {leads}, and the cost per booking was {costPerLead}.', // each placeholder looks only at its own words
+    'Things went well: {leads}.',
+    'Cost per lead was {costPerLead} and cost per booking was {costPerLead_change}.',
+  ]) assert.equal(check(text).ok, false, text);
+  for (const text of [
+    'Cost per lead was {costPerLead}, and cost per booking was {costPerBooking}.',
+    '{leads} leads came in, {paidLeads} of them paid leads.',
+    'Leads were {leads_change} on the previous report.',
+    'Your booking rate was {bookingRate}, and {bookings} consultations were booked.',
+    'Keep an eye on the cost per lead, which is currently {costPerLead}.',
+    'There are {missing_source_count} leads that do not show where they came from.',
+    '{missing_source_message}',
+  ]) assert.equal(check(text).ok, true, `${text}: ${check(text).errors}`);
+});
+
+test('every KPI and warning has a label, and the AI guide shows each one', () => {
+  const kpis = ['spend', 'leads', 'paidLeads', 'costPerLead', 'cancelled', 'bookings', 'costPerBooking', 'bookingRate', 'orders', 'revenue', 'roas', 'costPerOrder', 'avgOrderValue'];
+  assert.deepEqual(Object.keys(LABELS).sort(), [...kpis].sort());
+  assert.deepEqual(Object.keys(COUNT_LABELS).sort(), ['bad_totals', 'duplicates', 'meta_mismatch', 'meta_rejected', 'missing_source', 'outlier']);
+  const guide = placeholderGuide();
+  for (const k of [...kpis, ...Object.keys(COUNT_LABELS).map(c => `${c}_count`)]) assert.ok(guide.includes(`{${k}}:`), k);
+  // the guide's own examples must pass the check it describes (other errors, like a number with no value for this client, don't matter here)
+  for (const l of [...Object.values(LABELS), ...Object.values(COUNT_LABELS)]) {
+    const o = structuredClone(good); o.clients[0].summary = l.example;
+    const errors = validateAiOutput(o, input).errors || [];
+    assert.deepEqual(errors.filter(e => /near it|right after/.test(e)), [], l.example);
+  }
 });

@@ -3,6 +3,7 @@
 // Usage: node scripts/make-templates.mjs && npm run build
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { placeholderGuide } from '../lib/ai.js';
 
 const env = Object.fromEntries(readFileSync(new URL('../.env', import.meta.url), 'utf8').split(/\r?\n/)
   .filter(l => l.includes('=') && !l.startsWith('#')).map(l => [l.slice(0, l.indexOf('=')).trim(), l.slice(l.indexOf('=') + 1).trim()]));
@@ -173,6 +174,7 @@ const AI_SYSTEM = [
   'Keep each summary to two or three sentences: say what matters most this week and why, using only the few numbers that support it. Do not list every number; the report shows them all in a table.',
   'Explain every warning in client-friendly words, and suggest at most three practical next steps per client.',
   'A warning\'s message contains numbers, so never copy it: explain it in your own words with {<code>_count} (for example {duplicates_count}), or write {<code>_message} on its own to show the check\'s wording.',
+  placeholderGuide(),
   'Stay inside the length limits, counted after the placeholders are filled in: overview one sentence under 200 characters, headline under 90, summary under 600, each warning under 300, each next step under 200.',
   "Return JSON that matches the schema exactly. 'clinic' is the clinic, 'store' is the store.",
 ].join(' ');
