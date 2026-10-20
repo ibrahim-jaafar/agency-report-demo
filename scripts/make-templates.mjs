@@ -11,8 +11,14 @@ const ORIGIN = process.env.DEMO_EXTRA_ORIGIN ? 'https://ibrahim-jaafar.github.io
 const GHL = 'https://services.leadconnectorhq.com';
 const META_URL = `https://graph.facebook.com/v23.0/${env.META_DATASET_ID}/events`;
 const AI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
-// two attempts, two models: each has its own free daily quota (20 requests each), and Flash's answer wins when both are valid
-const AI_MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
+// Flash-Lite first: on the free tier it answers in seconds, while Flash often takes over a minute or is overloaded (measured 2026-10-20).
+// Flash is asked only when Lite's answer fails; each has its own free quota of 20 requests a day.
+const AI_MODELS = { first: 'gemini-flash-lite-latest', second: 'gemini-flash-latest' };
+const aiNode = (name, model) => ({ name, y: -300, type: 'n8n-nodes-base.httpRequest', v: 4.2,
+  params: { method: 'POST', url: AI_URL, authentication: 'genericCredentialType', genericAuthType: 'httpHeaderAuth',
+    sendBody: true, specifyBody: 'json', jsonBody: `={{ JSON.stringify({ model: '${model}', ...$('Checks').first().json.aiBody }) }}`,
+    options: { timeout: 45000, response: { response: { fullResponse: true, neverError: true } } } },
+  extra: { credentials: header('N8N_CRED_GEMINI', 'Gemini'), onError: 'continueRegularOutput' } });
 const CLIENTS = {
   clinic: { label: 'Clinic', name: 'Lumière Skin Clinic', location: env.GHL_LOCATION_CLINIC, pipeline: env.GHL_PIPELINE_CLINIC, stage: env.GHL_STAGE_CLINIC_WON, cred: ['N8N_CRED_GHL_CLINIC', 'GHL clinic'] },
   store: { label: 'Store', name: 'Northwind Home', location: env.GHL_LOCATION_STORE, pipeline: env.GHL_PIPELINE_STORE, stage: env.GHL_STAGE_STORE_WON, cred: ['N8N_CRED_GHL_STORE', 'GHL store'] },
@@ -78,6 +84,10 @@ const ANSWERS = "const answers = n => { const r = $(n).all().map(i => i.json); i
 const GHL_TEST_FLOOD = Number(process.env.GHL_TEST_FLOOD) || 0; // ponytail: test only, extra lookups that push a run over the rate limit
 const NOOP = ["// ponytail: one harmless lookup when there's nothing to save (n8n stops a branch with no items)",
   "if (!reqs.length) reqs.push({ kind: 'noop', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: C.location, pageLimit: 1 } } });"];
+
+const NAMES = `const NAMES = ${JSON.stringify({ clinic: [CLIENTS.clinic.label, CLIENTS.clinic.name], store: [CLIENTS.store.label, CLIENTS.store.name] })};`;
+// deploy.mjs puts in the report workflow's real id (n8n only gives one once it exists)
+const REPORT_ID = 'weekly-report';
 
 const STEP_HELPERS = [
   'const setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);',
@@ -162,6 +172,7 @@ const AI_SYSTEM = [
   'Changes compare with the previous report, not with an earlier week: call it "the previous report", never "the previous week" or "the week before".',
   'Keep each summary to two or three sentences: say what matters most this week and why, using only the few numbers that support it. Do not list every number; the report shows them all in a table.',
   'Explain every warning in client-friendly words, and suggest at most three practical next steps per client.',
+  'A warning\'s message contains numbers, so never copy it: explain it in your own words with {<code>_count} (for example {duplicates_count}), or write {<code>_message} on its own to show the check\'s wording.',
   'Stay inside the length limits, counted after the placeholders are filled in: overview one sentence under 200 characters, headline under 90, summary under 600, each warning under 300, each next step under 200.',
   "Return JSON that matches the schema exactly. 'clinic' is the clinic, 'store' is the store.",
 ].join(' ');
@@ -192,49 +203,88 @@ const run = [
   ...ghlSave('clinic', 'save deals', 'Clinic: deals', -300),
   afterSave(codeNode('Store: deals', dealsCode('store'), -300), 'clinic', 'save deals'),
   ...ghlSave('store', 'save deals', 'Store: deals', -300),
+  afterSave(codeNode('Hand over', [
+    '/*@lib*/',
+    ...STEP_HELPERS,
+    ANSWERS,
+    "// The fake customers are in GoHighLevel now. Note what it refused, then hand over to the weekly report,",
+    "// which reads GoHighLevel the way it would for a real client.",
+    "const plan = $('Plan run').first().json;",
+    'const rng = makeRng(plan.seed + 1);',
+    "let steps = $('Decide').first().json.steps;",
+    NAMES,
+    "let ghlStatus = 'done'; const ghlNotes = [], spend = {};",
+    'for (const [client, [label, name]] of Object.entries(NAMES)) {',
+    "  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = answers(b); return x.map((s, i) => [s, y[i] || {}]); };",
+    '  let total = 0, failed = 0;',
+    "  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) { if (s.kind !== 'contact') continue; total++; if (!(r.statusCode < 300 && r.body?.contact)) failed++; }",
+    "  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) { if (s.kind !== 'deal') continue; total++; if (!(r.statusCode < 300 && r.body?.opportunity)) failed++; }",
+    "  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }",
+    "  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }",
+    "  // stands in for the ad platform's spend report (Meta's Insights API for a real client)",
+    '  spend[client] = simulateSpend(client, plan.leads[client], plan.problems, rng);',
+    '}',
+    "steps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);",
+    "// problems: the mistakes the visitor picked (empty for a real client). select: which contacts belong to this report.",
+    "return [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, steps, spend, select: { tag: `run:${plan.runId}` } } }];"], -300), 'store', 'save deals'),
+  // waits for the report, so the cleanup below never deletes contacts the report is still reading
+  { name: 'Run the weekly report', y: -300, type: 'n8n-nodes-base.executeWorkflow', v: 1.2, params: { source: 'database',
+    workflowId: { __rl: true, mode: 'id', value: REPORT_ID }, mode: 'once',
+    workflowInputs: { mappingMode: 'defineBelow', value: {}, matchingColumns: [], schema: [], attemptToConvertTypes: false, convertFieldsToString: true },
+    options: { waitForSubWorkflow: true } } },
+];
+
+// ---------- the weekly report: the part a real client gets. It only reads GoHighLevel; it doesn't know the data is fake ----------
+const readCode = c => [
+  `// ${CLIENTS[c].name}: this report's contacts, and the newest deals in its pipeline (matched to those contacts next).`,
+  "const job = $('Start report').first().json;",
+  `const G = '${GHL}', L = '${CLIENTS[c].location}', P = '${CLIENTS[c].pipeline}';`,
+  'return [',
+  "  { json: { kind: 'contacts', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: L, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: job.select.tag }] } } } },",
+  "  // ponytail: first page only. One run at a time and newest first put this run's deals on it; real clients would page through meta.nextPageUrl",
+  "  { json: { kind: 'deals', req: { method: 'GET', url: `${G}/opportunities/search?location_id=${L}&pipeline_id=${P}&limit=100` } } },",
+  '];',
+];
+
+const report = [
+  { name: 'Start report', y: -300, type: 'n8n-nodes-base.executeWorkflowTrigger', v: 1.1, params: { inputSource: 'passthrough' } },
+  codeNode('Clinic: read', readCode('clinic'), -300),
+  ...ghlSave('clinic', 'read', 'Clinic: read', -300),
+  afterSave(codeNode('Store: read', readCode('store'), -300), 'clinic', 'read'),
+  ...ghlSave('store', 'read', 'Store: read', -300),
   afterSave(codeNode('CRM data', [
     '/*@lib*/',
     ...STEP_HELPERS,
     ANSWERS,
-    "// The report uses what GoHighLevel saved and sent back, not what was generated.",
-    "const plan = $('Plan run').first().json;",
+    "// The report uses what GoHighLevel has, read back from it, like it would for a real client.",
+    "const job = $('Start report').first().json;",
     "const crypto = require('crypto');",
     "const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');",
     'const nowSec = Math.floor(Date.now() / 1000);',
-    'const rng = makeRng(plan.seed + 1);',
-    "let steps = $('Decide').first().json.steps;",
-    'const ghlNotes = [], out = {};',
-    `const NAMES = ${JSON.stringify({ clinic: [CLIENTS.clinic.label, CLIENTS.clinic.name], store: [CLIENTS.store.label, CLIENTS.store.name] })};`,
-    "let ghlStatus = 'done';",
+    'let steps = job.steps;',
+    NAMES,
+    'const readNotes = [], out = {};',
     'for (const [client, [label, name]] of Object.entries(NAMES)) {',
-    "  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = answers(b); return x.map((s, i) => [s, y[i] || {}]); };",
-    "  const contacts = [], deals = new Map(); let total = 0, failed = 0;",
-    "  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) {",
-    "    if (s.kind !== 'contact') continue;",
-    '    total++;',
-    '    if (r.statusCode < 300 && r.body?.contact) contacts.push(r.body.contact); else failed++;',
-    '  }',
-    "  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) {",
-    "    if (s.kind !== 'deal') continue;",
-    '    total++;',
-    '    if (r.statusCode < 300 && r.body?.opportunity) deals.set(s.contactId, r.body.opportunity); else failed++;',
-    '  }',
-    '  const leads = contacts.map(c => {',
-    "    const d = deals.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));",
+    "  const got = answers(`GHL ${client}: read`);",
+    "  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || {}]));",
+    "  const contacts = r.contacts?.statusCode === 200 ? r.contacts.body?.contacts || [] : null;",
+    "  const deals = r.deals?.statusCode === 200 ? r.deals.body?.opportunities || [] : null;",
+    "  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);",
+    '  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));',
+    '  const leads = (contacts || []).map(c => {',
+    "    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded",
+    "    const d = dealOf.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));",
     "    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,",
     "      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),",
     "      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };",
     '  });',
-    "  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }",
-    "  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }",
-    '  const spend = simulateSpend(client, leads, plan.problems, rng);',
-    '  const meta = buildMetaEvents(client, leads, plan.problems, nowSec, sha256);',
-    '  out[client] = { client, name, leads, spend, ...meta };',
+    '  const meta = buildMetaEvents(client, leads, job.problems, nowSec, sha256);',
+    '  out[client] = { client, name, leads, spend: job.spend[client], ...meta };',
     '}',
-    "steps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);",
+    "if (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));",
     "steps = setStep(steps, 'spend', 'done');",
     "steps = setStep(steps, 'meta', 'running');",
-    'return [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, clients: out, steps } }];'], -300), 'store', 'save deals'),
+    'return [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, clients: out, steps } }];'], -300), 'store', 'read'),
   sql('Save progress 1', [
     '-- show the visitor the CRM step is done; also fetch the last finished report to compare against',
     'with u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)',
@@ -285,52 +335,47 @@ const run = [
     "  response_format: { type: 'json_schema', json_schema: { name: 'weekly_report', strict: true, schema: AI_SCHEMA } } };",
     'return [{ json: { ...crm, clients, aiInput, aiBody, steps } }];'], -300),
   sql('Save progress 2', [
-    '-- show the visitor the checks are done; two rows = two AI attempts in parallel (the first valid answer wins)',
+    '-- show the visitor the checks are done',
     'with u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)',
-    'select attempt from generate_series(1, 2) as attempt'],
+    'select 1 as saved'],
     '={{ [$json.runId, JSON.stringify($json.steps)] }}', -300),
-  { name: 'AI: write summary', y: -300, type: 'n8n-nodes-base.httpRequest', v: 4.2,
-    params: { method: 'POST', url: AI_URL, authentication: 'genericCredentialType', genericAuthType: 'httpHeaderAuth',
-      sendBody: true, specifyBody: 'json', jsonBody: `={{ JSON.stringify({ model: ${JSON.stringify(AI_MODELS)}[$json.attempt - 1], ...$('Checks').first().json.aiBody }) }}`,
-      options: { timeout: 60000, response: { response: { fullResponse: true, neverError: true } } } },
-    extra: { credentials: header('N8N_CRED_GEMINI', 'Gemini'), onError: 'continueRegularOutput' } },
-  codeNode('Build report', [
+  aiNode('AI: write summary', AI_MODELS.first),
+  codeNode('Check AI answer', [
+    '/*@lib*/',
+    "const ck = $('Checks').first().json;",
+    "return [{ json: { ok: !!pickAiAnswer($input.all().map(i => i.json), ck.aiInput, ck.problems.includes('ai_broken')).value } }];"], -300),
+  { name: 'AI answer ok?', y: -300, type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ $json.ok }}', sid('ai answer ok')) },
+  { branch: ['AI answer ok?', 1], x: 4840 },
+  { ...aiNode('AI: second try', AI_MODELS.second), y: -100 },
+  { ...codeNode('Build report', [
     '/*@lib*/',
     ...STEP_HELPERS,
     "const ck = $('Checks').first().json;",
-    "const replies = $('AI: write summary').all().map(i => i.json);",
-    'let ai = null, gotAnswer = false; const errors = [];',
-    'for (const r of replies) {',
-    '  let raw = r.statusCode === 200 ? r.body?.choices?.[0]?.message?.content : null;',
-    "  if (raw != null && ck.problems.includes('ai_broken')) raw = \"Sorry, I can't help with that.\";",
-    "  if (raw == null) { errors.push(`AI service answered ${r.statusCode ?? 'nothing'}`); continue; }",
-    '  gotAnswer = true;',
-    '  const v = validateAiOutput(raw, ck.aiInput);',
-    "  if (v.ok) { ai = { source: 'ai', value: v.value }; break; }",
-    '  errors.push(...v.errors);',
-    '}',
-    "let steps = ck.steps;",
-    "if (ai) steps = setStep(steps, 'ai', 'done');",
+    "// the first model's answer, then the second model's if it was asked",
+    "const replies = ['AI: write summary', 'AI: second try'].filter(n => $(n).isExecuted).flatMap(n => $(n).all().map(i => i.json));",
+    "const pick = pickAiAnswer(replies, ck.aiInput, ck.problems.includes('ai_broken'));",
+    'let steps = ck.steps, ai;',
+    "if (pick.value) { ai = { source: 'ai', value: pick.value }; steps = setStep(steps, 'ai', 'done'); }",
     'else {',
     "  ai = { source: 'template', value: templateSummary(ck.aiInput) };",
-    "  steps = gotAnswer ? setStep(steps, 'ai', 'warning', `AI answer rejected (${errors[0]}); template summary used`)",
-    "    : setStep(steps, 'ai', 'failed', `${errors[0] || 'no AI answer'}; template summary used`);",
+    "  steps = pick.gotAnswer ? setStep(steps, 'ai', 'warning', `AI answer rejected (${pick.errors[0]}); template summary used`)",
+    "    : setStep(steps, 'ai', 'failed', `${pick.errors[0] || 'no AI answer'}; template summary used`);",
     '}',
     'const metaSkipped = ck.clients.reduce((a, c) => a + c.skipped, 0);',
     'const report = buildReport({ runId: ck.runId, weekStart: ck.weekStart, clients: ck.clients, steps, ai, problems: ck.problems, metaSkipped });',
-    "return [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps } }];"], -300),
+    "return [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps } }];"], -300), alsoFrom: ['AI answer ok?', 0] },
   sql('Save result', 'update demo_runs set status = $2, report = $3::jsonb, steps = $4::jsonb where id = $1::uuid returning id',
     '={{ [$json.runId, $json.status, JSON.stringify($json.report), JSON.stringify($json.steps)] }}', -300),
 ];
 
-// ---------- cleanup: after the report is saved, delete demo contacts older than 7 days (GoHighLevel removes their deals too) ----------
+// ---------- cleanup (demo only): after the report is saved, delete demo contacts older than 7 days (GoHighLevel removes their deals too) ----------
 // Here and not on a schedule: the free server sleeps, so a nightly job wouldn't fire. The visitor already has the report.
 const CLEANUP_HOURS = Number(process.env.CLEANUP_HOURS) || 7 * 24; // ponytail: the env override is only for testing
 const CLEANUP_MAX = 25; // per client per run: more than a run creates, and about 13 s at 2 a second
 const cleanup = (c, y) => {
   const L = CLIENTS[c].label;
   return [
-    { branch: ['Save result', 0], x: 880 },
+    { branch: ['Run the weekly report', 0], x: 880 },
     codeNode(`${L}: find old contacts`, [
       `// the oldest demo contacts in ${CLIENTS[c].name} older than ${CLEANUP_HOURS} hours`,
       `return [{ json: { req: { method: 'POST', url: '${GHL}/contacts/search', body: { locationId: '${CLIENTS[c].location}', pageLimit: ${CLEANUP_MAX},`,
@@ -349,6 +394,7 @@ const cleanup = (c, y) => {
 };
 
 const demoRun = workflow('demo-run', [...start, ...refuse, ...run, ...cleanup('clinic', 600), ...cleanup('store', 800)]);
+const weeklyReport = workflow('weekly-report', report);
 
 const demoStatus = workflow('demo-status', [
   { name: 'Status webhook', type: 'n8n-nodes-base.webhook', v: 2, params: { httpMethod: 'GET', path: 'demo/status', responseMode: 'lastNode', options: { allowedOrigins: ORIGIN } }, extra: { webhookId: sid('demo/status') } },
@@ -368,5 +414,5 @@ const errorHandler = workflow('error-handler', [
     "={{ [String($json.execution?.error?.message ?? 'unknown error').slice(0, 500) + ' (node: ' + ($json.execution?.lastNodeExecuted ?? '?') + ')'] }}"),
 ]);
 
-for (const wf of [demoRun, demoStatus, errorHandler]) writeFileSync(new URL(`../workflows/src/${wf.name}.json`, import.meta.url), JSON.stringify(wf, null, 2) + '\n');
+for (const wf of [demoRun, weeklyReport, demoStatus, errorHandler]) writeFileSync(new URL(`../workflows/src/${wf.name}.json`, import.meta.url), JSON.stringify(wf, null, 2) + '\n');
 console.log('templates written');

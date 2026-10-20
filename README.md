@@ -6,7 +6,7 @@ A weekly marketing report built with n8n: leads from GoHighLevel, conversions se
 
 - **Live:** the n8n workflow (Render), the run history (Supabase), the leads and deals saved in a GoHighLevel sandbox, the conversions sent to Meta's Conversions API (a demo dataset with no ads; Meta treats them as normal events unless its Test Events tab is open), the data checks and the Gemini summary.
 - **Made up:** the two clients, their leads, the ad spend (simulated per campaign) and the mistakes a visitor chooses.
-- **Limits:** one run at a time, one a minute, 50 a day. Gemini's free tier allows 20 requests a day per model; each run tries Flash and Flash-Lite at once, so about 20 runs a day get an AI summary and later runs use the template.
+- **Limits:** one run at a time, one a minute, 50 a day. Gemini's free tier allows 20 requests a day per model; each run asks Flash-Lite first (it answers in seconds) and Flash only if Lite's answer fails, so about 20 runs a day get an AI summary and later runs use the template. Flash was left as the backup because on the free tier it often takes over a minute or is overloaded.
 - **AI summary:** the AI never types a number. It writes placeholders such as `{costPerLead}` or `{leads_change}`, and code puts in the real values (`$22.34`, `up 20%`), so a number in the summary can't be wrong. An answer is refused if it types a digit, uses a placeholder that doesn't exist or has no value this week, writes "rose" or "fell" next to a change (the change already says up or down), or is too long once filled in. The template summary uses the same placeholders and the same check.
 - **GoHighLevel limit:** our sandbox token allows 25 requests per 10 seconds per sub-account (its `X-RateLimit-*` headers say so; the docs say 100) and 10,000 a day. GoHighLevel has no bulk create for contacts or deals, so a run sends one request per record, 2 a second. Anything refused (429) is sent once more after a 10-second pause.
 - **Cleanup:** after the report is saved, each run deletes up to 25 demo contacts older than 7 days per sub-account (their deals go with them). It runs there and not on a schedule because the free server sleeps.
@@ -33,8 +33,12 @@ Keys (GoHighLevel, Meta, Gemini) are stored only in n8n credentials.
 
 ## Workflows
 
+- **demo-run** (the demo only): checks the limits, answers the page, makes up the week's customers and saves them in GoHighLevel, then calls the weekly report and waits for it, then deletes old demo contacts. For a real client this part goes away.
+- **weekly-report** (what a real client would get): reads the contacts and deals back from GoHighLevel, sends the conversions to Meta, runs the checks, has the AI write the summary and saves the report. It never writes to GoHighLevel and doesn't know the data is fake. For a real client it would select contacts by date instead of by the run's tag, and read ad spend from Meta's Insights API instead of the simulated spend the demo passes in.
+- **demo-status** answers the page's progress checks; **error-handler** marks a run failed if either workflow crashes.
+
 - Edit `scripts/make-templates.mjs` (not the JSON), then `node scripts/make-templates.mjs` → `workflows/src/`.
-- `node scripts/deploy.mjs` builds `dist/` (tested `lib/` pasted into the Code nodes) and uploads/publishes the 3 workflows. It needs `N8N_API_KEY` plus the IDs in `.env` (credential IDs, GHL location/pipeline/stage IDs, Meta dataset, test code).
+- `node scripts/deploy.mjs` builds `dist/` (tested `lib/` pasted into the Code nodes) and uploads/publishes the 4 workflows (it puts the weekly report's n8n id into demo-run). It needs `N8N_API_KEY` plus the IDs in `.env` (credential IDs, GHL location/pipeline/stage IDs, Meta dataset, test code).
 - To test the demo page from your own machine, build with `DEMO_EXTRA_ORIGIN=http://localhost:8765 node scripts/make-templates.mjs`, deploy, test, then build and deploy again without it.
 - Test-only switches for the same build step: `GHL_BATCH=25` (no pacing), `GHL_TEST_FLOOD=30` (extra lookups that push a run over the GoHighLevel limit, to test the retry) and `CLEANUP_HOURS=1` (clean up contacts older than an hour). Build and deploy again without them afterwards.
 - n8n credentials (all **Header Auth**, `Authorization: Bearer <token>`, except the database): `Supabase demo` (Postgres, SSL require + ignore certificate), `GHL clinic`, `GHL store`, `Meta CAPI`, `Gemini`.
@@ -54,6 +58,6 @@ Keys (GoHighLevel, Meta, Gemini) are stored only in n8n credentials.
 | Find demo contacts older than 7 days | `POST /contacts/search` (tag filter + `dateAdded` range, oldest first) |
 | Delete them | `DELETE /contacts/<id>` (GoHighLevel removes their deals too) |
 | Conversions | `POST https://graph.facebook.com/v23.0/<dataset>/events` with `test_event_code` |
-| AI summary | `POST https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, models `gemini-flash-latest` and `gemini-flash-lite-latest` (one attempt each, in parallel), strict JSON schema |
+| AI summary | `POST https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`, `gemini-flash-lite-latest` first, then `gemini-flash-latest` only if Lite's answer fails (45 s limit each), strict JSON schema |
 
 GoHighLevel's search lags a few seconds behind new contacts, so a run builds its report from the records GoHighLevel returns when they're saved, not from a search.

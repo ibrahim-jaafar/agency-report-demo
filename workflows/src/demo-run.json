@@ -894,8 +894,8 @@
       "onError": "continueRegularOutput"
     },
     {
-      "id": "600f3b77-7cea-b557-a401-881a0e975a03",
-      "name": "CRM data",
+      "id": "08e2129f-75e0-b37e-f136-b9594a8939e8",
+      "name": "Hand over",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -903,188 +903,36 @@
         -300
       ],
       "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };\n// The report uses what GoHighLevel saved and sent back, not what was generated.\nconst plan = $('Plan run').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nconst rng = makeRng(plan.seed + 1);\nlet steps = $('Decide').first().json.steps;\nconst ghlNotes = [], out = {};\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nlet ghlStatus = 'done';\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = answers(b); return x.map((s, i) => [s, y[i] || {}]); };\n  const contacts = [], deals = new Map(); let total = 0, failed = 0;\n  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) {\n    if (s.kind !== 'contact') continue;\n    total++;\n    if (r.statusCode < 300 && r.body?.contact) contacts.push(r.body.contact); else failed++;\n  }\n  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) {\n    if (s.kind !== 'deal') continue;\n    total++;\n    if (r.statusCode < 300 && r.body?.opportunity) deals.set(s.contactId, r.body.opportunity); else failed++;\n  }\n  const leads = contacts.map(c => {\n    const d = deals.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }\n  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }\n  const spend = simulateSpend(client, leads, plan.problems, rng);\n  const meta = buildMetaEvents(client, leads, plan.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend, ...meta };\n}\nsteps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, clients: out, steps } }];"
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };\n// The fake customers are in GoHighLevel now. Note what it refused, then hand over to the weekly report,\n// which reads GoHighLevel the way it would for a real client.\nconst plan = $('Plan run').first().json;\nconst rng = makeRng(plan.seed + 1);\nlet steps = $('Decide').first().json.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nlet ghlStatus = 'done'; const ghlNotes = [], spend = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const pair = (a, b) => { const x = $(a).all().map(i => i.json), y = answers(b); return x.map((s, i) => [s, y[i] || {}]); };\n  let total = 0, failed = 0;\n  for (const [s, r] of pair(`${label}: contacts`, `GHL ${client}: save contacts`)) { if (s.kind !== 'contact') continue; total++; if (!(r.statusCode < 300 && r.body?.contact)) failed++; }\n  for (const [s, r] of pair(`${label}: deals`, `GHL ${client}: save deals`)) { if (s.kind !== 'deal') continue; total++; if (!(r.statusCode < 300 && r.body?.opportunity)) failed++; }\n  if (total && failed === total) { ghlStatus = 'failed'; ghlNotes.push(`${name}: GoHighLevel did not accept the data`); }\n  else if (failed) { if (ghlStatus === 'done') ghlStatus = 'warning'; ghlNotes.push(`${name}: ${failed} of ${total} records could not be saved`); }\n  // stands in for the ad platform's spend report (Meta's Insights API for a real client)\n  spend[client] = simulateSpend(client, plan.leads[client], plan.problems, rng);\n}\nsteps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);\n// problems: the mistakes the visitor picked (empty for a real client). select: which contacts belong to this report.\nreturn [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, steps, spend, select: { tag: `run:${plan.runId}` } } }];"
       }
     },
     {
-      "id": "cec387d9-dffd-a197-5bf7-02a3b6e9c7cf",
-      "name": "Save progress 1",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
+      "id": "7089ccd6-b0db-6b4c-a762-1ccc8e3fd5a5",
+      "name": "Run the weekly report",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
       "position": [
         7040,
         -300
       ],
       "parameters": {
-        "operation": "executeQuery",
-        "query": "-- show the visitor the CRM step is done; also fetch the last finished report to compare against\nwith u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)\nselect (select report from demo_runs where status in ('done','partial') and id <> $1::uuid order by created_at desc limit 1) as prev",
-        "options": {
-          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.steps)] }}"
-        }
-      },
-      "credentials": {
-        "postgres": {
-          "id": "8VYMdYQi4ONq8evJ",
-          "name": "Supabase demo"
-        }
-      }
-    },
-    {
-      "id": "38297791-7486-9f12-3da8-7c4105729f22",
-      "name": "Meta requests",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        7260,
-        -300
-      ],
-      "parameters": {
-        "jsCode": "const { clients } = $('CRM data').first().json;\nconst body = data => ({ data, test_event_code: 'TEST68789' });\nconst reqs = [];\nfor (const c of Object.values(clients)) {\n  // ponytail: always one request per client, even with no events (Meta then answers 400; counted as 0 sent)\n  reqs.push({ client: c.client, kind: 'main', count: c.events.length, req: { method: 'POST', url: 'https://graph.facebook.com/v23.0/2897515730634456/events', body: body(c.events) } });\n  // the deliberately too-old event goes alone, so Meta's rejection can't sink the real batch\n  if (c.edgeEvents.length) reqs.push({ client: c.client, kind: 'edge', count: c.edgeEvents.length, req: { method: 'POST', url: 'https://graph.facebook.com/v23.0/2897515730634456/events', body: body(c.edgeEvents) } });\n}\nreturn reqs.map(json => ({ json }));"
-      }
-    },
-    {
-      "id": "e818fe3f-d240-cd8b-748e-7b6ab1b767df",
-      "name": "Meta: send conversions",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        7480,
-        -300
-      ],
-      "parameters": {
-        "method": "={{ $json.req.method }}",
-        "url": "={{ $json.req.url }}",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendHeaders": false,
-        "headerParameters": {
-          "parameters": []
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "weekly-report"
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "mode": "once",
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
         "options": {
-          "timeout": 30000,
-          "response": {
-            "response": {
-              "fullResponse": true,
-              "neverError": true
-            }
-          }
-        }
-      },
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "k6Iu2Bgfzguocbux",
-          "name": "Meta CAPI"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "id": "ce7f5961-47db-22b7-6415-9216739f7492",
-      "name": "Checks",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        7700,
-        -300
-      ],
-      "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst crm = $('CRM data').first().json;\nconst prev = $('Save progress 1').first().json.prev;\nconst sent = $('Meta requests').all().map(i => i.json), got = $('Meta: send conversions').all().map(i => i.json);\nlet steps = crm.steps, metaFailed = [];\nconst clients = Object.values(crm.clients).map(c => {\n  let meta = { sent: 0, accepted: 0, rejected: 0 };\n  sent.forEach((s, i) => {\n    if (s.client !== c.client || !s.count) return;\n    const r = got[i] || {};\n    meta.sent += s.count;\n    if (s.kind === 'main' && r.statusCode !== 200) { metaFailed.push(`${c.name}: Meta answered ${r.statusCode ?? 'nothing'}`); meta = null; return; }\n    if (!meta) return;\n    const ok = r.statusCode === 200 ? Number(r.body?.events_received) || 0 : 0;\n    if (s.kind === 'main') meta.accepted += ok;\n    meta.rejected += s.count - ok;\n  });\n  const weekStart = new Date(crm.weekStart);\n  const kpis = computeKpis(c.client, c.leads, c.spend, weekStart);\n  const warnings = runChecks({ client: c.client, leads: c.leads, spend: c.spend, meta, weekStart });\n  const previousKpis = prev?.clients?.find(p => p.client === c.client)?.kpis ?? null;\n  return { client: c.client, name: c.name, kpis, previousKpis, warnings, skipped: c.skipped };\n});\nsteps = setStep(steps, 'meta', metaFailed.length ? 'failed' : 'done', metaFailed.join('; ') || undefined);\nsteps = setStep(steps, 'checks', 'done');\nsteps = setStep(steps, 'ai', 'running');\nconst aiInput = buildAiInput(clients);\nconst aiBody = { messages: [{ role: 'system', content: \"You write the weekly results summary that a marketing agency's account manager reads before sending reports to two clients. Use plain, friendly English. Never type a digit. Wherever a number goes, write a placeholder from that client's \\\"placeholders\\\" list in curly braces, exactly as named, for example {costPerLead}. Code replaces each placeholder with the value listed next to it, so you can see what the reader will see. Never calculate new numbers. Use only the placeholders of the client you are writing about. The overview covers both clients and has no numbers or placeholders. Placeholders ending in _change already say which way it went (for example \\\"up 5%\\\" or \\\"down 33%\\\"): write \\\"leads were {leads_change} on the previous report\\\", never \\\"leads rose {leads_change}\\\". Outside the curly braces, never write field names such as costPerLead or paidLeads; say \\\"cost per lead\\\" or \\\"paid leads\\\". The data covers last week (Monday to Sunday). Changes compare with the previous report, not with an earlier week: call it \\\"the previous report\\\", never \\\"the previous week\\\" or \\\"the week before\\\". Keep each summary to two or three sentences: say what matters most this week and why, using only the few numbers that support it. Do not list every number; the report shows them all in a table. Explain every warning in client-friendly words, and suggest at most three practical next steps per client. Stay inside the length limits, counted after the placeholders are filled in: overview one sentence under 200 characters, headline under 90, summary under 600, each warning under 300, each next step under 200. Return JSON that matches the schema exactly. 'clinic' is the clinic, 'store' is the store.\" }, { role: 'user', content: JSON.stringify(aiInput) }],\n  response_format: { type: 'json_schema', json_schema: { name: 'weekly_report', strict: true, schema: AI_SCHEMA } } };\nreturn [{ json: { ...crm, clients, aiInput, aiBody, steps } }];"
-      }
-    },
-    {
-      "id": "b60ca2a3-420c-213d-2a98-1bd74a62ea67",
-      "name": "Save progress 2",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        7920,
-        -300
-      ],
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "-- show the visitor the checks are done; two rows = two AI attempts in parallel (the first valid answer wins)\nwith u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)\nselect attempt from generate_series(1, 2) as attempt",
-        "options": {
-          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.steps)] }}"
-        }
-      },
-      "credentials": {
-        "postgres": {
-          "id": "8VYMdYQi4ONq8evJ",
-          "name": "Supabase demo"
-        }
-      }
-    },
-    {
-      "id": "303cf6c5-2c14-50ee-2401-1b06b7cac886",
-      "name": "AI: write summary",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        8140,
-        -300
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: [\"gemini-flash-latest\",\"gemini-flash-lite-latest\"][$json.attempt - 1], ...$('Checks').first().json.aiBody }) }}",
-        "options": {
-          "timeout": 60000,
-          "response": {
-            "response": {
-              "fullResponse": true,
-              "neverError": true
-            }
-          }
-        }
-      },
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "OZF5vuPL8kSAiXEF",
-          "name": "Gemini"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "id": "d6da3373-21de-5ec0-fefe-8af9299d3a6b",
-      "name": "Build report",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        8360,
-        -300
-      ],
-      "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst ck = $('Checks').first().json;\nconst replies = $('AI: write summary').all().map(i => i.json);\nlet ai = null, gotAnswer = false; const errors = [];\nfor (const r of replies) {\n  let raw = r.statusCode === 200 ? r.body?.choices?.[0]?.message?.content : null;\n  if (raw != null && ck.problems.includes('ai_broken')) raw = \"Sorry, I can't help with that.\";\n  if (raw == null) { errors.push(`AI service answered ${r.statusCode ?? 'nothing'}`); continue; }\n  gotAnswer = true;\n  const v = validateAiOutput(raw, ck.aiInput);\n  if (v.ok) { ai = { source: 'ai', value: v.value }; break; }\n  errors.push(...v.errors);\n}\nlet steps = ck.steps;\nif (ai) steps = setStep(steps, 'ai', 'done');\nelse {\n  ai = { source: 'template', value: templateSummary(ck.aiInput) };\n  steps = gotAnswer ? setStep(steps, 'ai', 'warning', `AI answer rejected (${errors[0]}); template summary used`)\n    : setStep(steps, 'ai', 'failed', `${errors[0] || 'no AI answer'}; template summary used`);\n}\nconst metaSkipped = ck.clients.reduce((a, c) => a + c.skipped, 0);\nconst report = buildReport({ runId: ck.runId, weekStart: ck.weekStart, clients: ck.clients, steps, ai, problems: ck.problems, metaSkipped });\nreturn [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps } }];"
-      }
-    },
-    {
-      "id": "0a2f121c-9ab6-f5ed-fc4d-c40e60b5086f",
-      "name": "Save result",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        8580,
-        -300
-      ],
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "update demo_runs set status = $2, report = $3::jsonb, steps = $4::jsonb where id = $1::uuid returning id",
-        "options": {
-          "queryReplacement": "={{ [$json.runId, $json.status, JSON.stringify($json.report), JSON.stringify($json.steps)] }}"
-        }
-      },
-      "credentials": {
-        "postgres": {
-          "id": "8VYMdYQi4ONq8evJ",
-          "name": "Supabase demo"
+          "waitForSubWorkflow": true
         }
       }
     },
@@ -1711,7 +1559,7 @@
         ],
         [
           {
-            "node": "CRM data",
+            "node": "Hand over",
             "type": "main",
             "index": 0
           }
@@ -1733,102 +1581,25 @@
       "main": [
         [
           {
-            "node": "CRM data",
+            "node": "Hand over",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "CRM data": {
+    "Hand over": {
       "main": [
         [
           {
-            "node": "Save progress 1",
+            "node": "Run the weekly report",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Save progress 1": {
-      "main": [
-        [
-          {
-            "node": "Meta requests",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Meta requests": {
-      "main": [
-        [
-          {
-            "node": "Meta: send conversions",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Meta: send conversions": {
-      "main": [
-        [
-          {
-            "node": "Checks",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Checks": {
-      "main": [
-        [
-          {
-            "node": "Save progress 2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Save progress 2": {
-      "main": [
-        [
-          {
-            "node": "AI: write summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "AI: write summary": {
-      "main": [
-        [
-          {
-            "node": "Build report",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build report": {
-      "main": [
-        [
-          {
-            "node": "Save result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Save result": {
+    "Run the weekly report": {
       "main": [
         [
           {

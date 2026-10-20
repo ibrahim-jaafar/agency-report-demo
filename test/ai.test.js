@@ -5,7 +5,7 @@ import { generateLeads } from '../lib/leads.js';
 import { simulateSpend } from '../lib/spend.js';
 import { computeKpis } from '../lib/kpis.js';
 import { runChecks } from '../lib/checks.js';
-import { AI_SCHEMA, buildAiInput, validateAiOutput, templateDraft, templateSummary } from '../lib/ai.js';
+import { AI_SCHEMA, buildAiInput, validateAiOutput, pickAiAnswer, templateDraft, templateSummary } from '../lib/ai.js';
 
 const W = new Date('2026-10-12T00:00:00Z');
 const NAMES = { clinic: 'Lumière Skin Clinic', store: 'Northwind Home' };
@@ -74,6 +74,19 @@ test('accepts a correct answer, as object or JSON string, and fills in the real 
   assert.equal(r.value.clients[0].headline, '58 leads and 14 booked consultations');
   assert.equal(r.value.clients[0].summary, 'Leads were up 16% on the previous report, at $24.80 each. Booking rate was 24.1%.');
   assert.equal(r.value.clients[1].headline, '$4,820.00 revenue from 12 orders');
+});
+
+test('pickAiAnswer takes the first reply that passes, and says why the others failed', () => {
+  const reply = v => ({ statusCode: 200, body: { choices: [{ message: { content: JSON.stringify(v) } }] } });
+  const typed = structuredClone(good); typed.clients[0].summary = 'There were 58 leads.';
+  const p = pickAiAnswer([reply(typed), reply(good)], input);
+  assert.equal(p.value.clients[0].headline, '58 leads and 14 booked consultations');
+  assert.match(p.errors[0], /types a number/);
+  const none = pickAiAnswer([{ error: { message: 'timeout' } }, { statusCode: 503, body: {} }], input);
+  assert.deepEqual([none.value, none.gotAnswer, none.errors], [null, false, ['AI service answered nothing', 'AI service answered 503']]);
+  const broken = pickAiAnswer([reply(good)], input, true);
+  assert.equal(broken.value, null);
+  assert.equal(broken.gotAnswer, true, 'the AI answered; the demo swapped it for a refusal');
 });
 
 test('rejects invalid JSON, prose, missing keys, extra keys, wrong client count, duplicate clients', () => {

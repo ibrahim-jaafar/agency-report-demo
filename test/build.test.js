@@ -47,7 +47,7 @@ test('lib is injected byte for byte (no $-pattern rewriting)', () => {
 });
 
 test('answers() puts retried GoHighLevel replies back in their place', () => {
-  const wf = JSON.parse(readFileSync(new URL('../workflows/src/demo-run.json', import.meta.url), 'utf8'));
+  const wf = JSON.parse(readFileSync(new URL('../workflows/src/weekly-report.json', import.meta.url), 'utf8'));
   const line = wf.nodes.find(n => n.name === 'CRM data').parameters.jsCode.split('\n').find(l => l.startsWith('const answers'));
   const j = o => ({ json: o });
   const nodes = {
@@ -60,4 +60,16 @@ test('answers() puts retried GoHighLevel replies back in their place', () => {
   assert.deepEqual(answers('N').map(r => r.a ?? r.statusCode), [0, 1, 2, 429]);
   delete nodes['N (retry)'];
   assert.deepEqual(answers('N').map(r => r.a ?? r.statusCode), [0, 429, 2, 429]);
+});
+
+test('the weekly report only reads GoHighLevel, and the demo hands over to it', () => {
+  const wf = name => JSON.parse(readFileSync(new URL(`../workflows/src/${name}.json`, import.meta.url), 'utf8'));
+  const report = wf('weekly-report'), demo = wf('demo-run');
+  const reqs = report.nodes.filter(n => n.type === 'n8n-nodes-base.code').map(n => n.parameters.jsCode).join('\n').match(/method: '[A-Z]+', url: `[^`]*`/g);
+  assert.deepEqual([...new Set(reqs)].sort(), ["method: 'GET', url: `${G}/opportunities/search?location_id=${L}&pipeline_id=${P}&limit=100`", "method: 'POST', url: `${G}/contacts/search`"]);
+  assert.equal(report.nodes[0].type, 'n8n-nodes-base.executeWorkflowTrigger');
+  const call = demo.nodes.find(n => n.type === 'n8n-nodes-base.executeWorkflow');
+  assert.equal(call.parameters.workflowId.value, 'weekly-report');
+  assert.equal(call.parameters.options.waitForSubWorkflow, true, 'cleanup must wait for the report');
+  for (const n of ['Meta: send conversions', 'AI: write summary', 'Checks']) assert.ok(!demo.nodes.some(x => x.name === n) && report.nodes.some(x => x.name === n), n);
 });

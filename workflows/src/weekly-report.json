@@ -1,0 +1,936 @@
+{
+  "name": "weekly-report",
+  "nodes": [
+    {
+      "id": "bd4d8e5d-bd6e-50f2-1ec9-ff22aca3d76e",
+      "name": "Start report",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        -300
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "365957ab-9542-95c3-8488-6e472ea057b7",
+      "name": "Clinic: read",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Lumière Skin Clinic: this report's contacts, and the newest deals in its pipeline (matched to those contacts next).\nconst job = $('Start report').first().json;\nconst G = 'https://services.leadconnectorhq.com', L = 'lX1GDRcqD985tKgOM4I3', P = 'e3YMhd6OJWtcGA9MFPnx';\nreturn [\n  { json: { kind: 'contacts', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: L, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: job.select.tag }] } } } },\n  // ponytail: first page only. One run at a time and newest first put this run's deals on it; real clients would page through meta.nextPageUrl\n  { json: { kind: 'deals', req: { method: 'GET', url: `${G}/opportunities/search?location_id=${L}&pipeline_id=${P}&limit=100` } } },\n];"
+      }
+    },
+    {
+      "id": "3d6f4b8f-ce76-f570-e94e-533637c7b6e6",
+      "name": "GHL clinic: read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "8443e35a-a04c-2ed7-db4a-c3a1b523f9bb",
+      "name": "GHL clinic: read (refused)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Clinic: read').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "8ae4df18-817f-9c18-9b3e-861bc5185848",
+      "name": "GHL clinic: read (any refused?)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c7357959-81ed-704b-0af7-06adb6c562ea",
+              "leftValue": "={{ !!$json.req }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "95f79cdf-fced-df20-9475-b8af9bb6e395",
+      "name": "GHL clinic: read (pause)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        -300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "webhookId": "f17c59cb-d8e8-d496-bb12-e48391a276b1"
+    },
+    {
+      "id": "396ee002-2872-2188-a131-cb977f07a597",
+      "name": "GHL clinic: read (retry)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "c5a33bcd-c0e3-03ee-7015-fc18bebfd49f",
+      "name": "Store: read",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// Northwind Home: this report's contacts, and the newest deals in its pipeline (matched to those contacts next).\nconst job = $('Start report').first().json;\nconst G = 'https://services.leadconnectorhq.com', L = 'VxYMePPrdwUBRt79Z4wC', P = 'F1gLtHkYfr2SF8ulCrzs';\nreturn [\n  { json: { kind: 'contacts', req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: L, pageLimit: 100, filters: [{ field: 'tags', operator: 'eq', value: job.select.tag }] } } } },\n  // ponytail: first page only. One run at a time and newest first put this run's deals on it; real clients would page through meta.nextPageUrl\n  { json: { kind: 'deals', req: { method: 'GET', url: `${G}/opportunities/search?location_id=${L}&pipeline_id=${P}&limit=100` } } },\n];"
+      }
+    },
+    {
+      "id": "4b3db65d-9c7c-43a0-cc60-08230ce94015",
+      "name": "GHL store: read",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "7e9bfb0f-4b45-247d-360b-016272592dfe",
+      "name": "GHL store: read (refused)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "// requests refused for going over the rate limit; none = one empty item (always output data), so the IF can route it\nconst sent = $('Store: read').all().map(i => i.json);\nreturn $input.all().flatMap((it, i) => it.json.statusCode === 429 ? [{ json: { i, req: sent[i].req } }] : []);"
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "b4b0f7cd-29f0-24a7-2f4b-6eebc3c69a4d",
+      "name": "GHL store: read (any refused?)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "5acb5e02-7983-ced4-d71f-b78ce93b468a",
+              "leftValue": "={{ !!$json.req }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "86f6ba3c-ae54-6d12-afd5-3514bcb89e96",
+      "name": "GHL store: read (pause)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2420,
+        -300
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "webhookId": "04df6614-d1c2-b55b-c4ef-8b7077ffc262"
+    },
+    {
+      "id": "84747038-3dfc-5cfc-dfd8-d1c646b88d18",
+      "name": "GHL store: read (retry)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2640,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "5c3fcec6-91f0-3713-6432-a2986be1167e",
+      "name": "CRM data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst answers = n => { const r = $(n).all().map(i => i.json); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); $(`${n} (retry)`).all().forEach((it, k) => { r[idx[k]] = it.json; }); } return r; };\n// The report uses what GoHighLevel has, read back from it, like it would for a real client.\nconst job = $('Start report').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nlet steps = job.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nconst readNotes = [], out = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const got = answers(`GHL ${client}: read`);\n  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || {}]));\n  const contacts = r.contacts?.statusCode === 200 ? r.contacts.body?.contacts || [] : null;\n  const deals = r.deals?.statusCode === 200 ? r.deals.body?.opportunities || [] : null;\n  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);\n  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));\n  const leads = (contacts || []).map(c => {\n    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded\n    const d = dealOf.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  const meta = buildMetaEvents(client, leads, job.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend: job.spend[client], ...meta };\n}\nif (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, clients: out, steps } }];"
+      }
+    },
+    {
+      "id": "bb53fc20-c719-5b8f-18c0-8ead0582952f",
+      "name": "Save progress 1",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3080,
+        -300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- show the visitor the CRM step is done; also fetch the last finished report to compare against\nwith u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)\nselect (select report from demo_runs where status in ('done','partial') and id <> $1::uuid order by created_at desc limit 1) as prev",
+        "options": {
+          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.steps)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    },
+    {
+      "id": "7f59870e-31af-9f82-902e-c151ec7d220c",
+      "name": "Meta requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3300,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "const { clients } = $('CRM data').first().json;\nconst body = data => ({ data, test_event_code: 'TEST68789' });\nconst reqs = [];\nfor (const c of Object.values(clients)) {\n  // ponytail: always one request per client, even with no events (Meta then answers 400; counted as 0 sent)\n  reqs.push({ client: c.client, kind: 'main', count: c.events.length, req: { method: 'POST', url: 'https://graph.facebook.com/v23.0/2897515730634456/events', body: body(c.events) } });\n  // the deliberately too-old event goes alone, so Meta's rejection can't sink the real batch\n  if (c.edgeEvents.length) reqs.push({ client: c.client, kind: 'edge', count: c.edgeEvents.length, req: { method: 'POST', url: 'https://graph.facebook.com/v23.0/2897515730634456/events', body: body(c.edgeEvents) } });\n}\nreturn reqs.map(json => ({ json }));"
+      }
+    },
+    {
+      "id": "cbda2ce6-5940-3ea7-e50a-e5c2145f05c7",
+      "name": "Meta: send conversions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3520,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": false,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k6Iu2Bgfzguocbux",
+          "name": "Meta CAPI"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "01fdc11d-0922-4c35-84b3-ccd242caa745",
+      "name": "Checks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3740,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst crm = $('CRM data').first().json;\nconst prev = $('Save progress 1').first().json.prev;\nconst sent = $('Meta requests').all().map(i => i.json), got = $('Meta: send conversions').all().map(i => i.json);\nlet steps = crm.steps, metaFailed = [];\nconst clients = Object.values(crm.clients).map(c => {\n  let meta = { sent: 0, accepted: 0, rejected: 0 };\n  sent.forEach((s, i) => {\n    if (s.client !== c.client || !s.count) return;\n    const r = got[i] || {};\n    meta.sent += s.count;\n    if (s.kind === 'main' && r.statusCode !== 200) { metaFailed.push(`${c.name}: Meta answered ${r.statusCode ?? 'nothing'}`); meta = null; return; }\n    if (!meta) return;\n    const ok = r.statusCode === 200 ? Number(r.body?.events_received) || 0 : 0;\n    if (s.kind === 'main') meta.accepted += ok;\n    meta.rejected += s.count - ok;\n  });\n  const weekStart = new Date(crm.weekStart);\n  const kpis = computeKpis(c.client, c.leads, c.spend, weekStart);\n  const warnings = runChecks({ client: c.client, leads: c.leads, spend: c.spend, meta, weekStart });\n  const previousKpis = prev?.clients?.find(p => p.client === c.client)?.kpis ?? null;\n  return { client: c.client, name: c.name, kpis, previousKpis, warnings, skipped: c.skipped };\n});\nsteps = setStep(steps, 'meta', metaFailed.length ? 'failed' : 'done', metaFailed.join('; ') || undefined);\nsteps = setStep(steps, 'checks', 'done');\nsteps = setStep(steps, 'ai', 'running');\nconst aiInput = buildAiInput(clients);\nconst aiBody = { messages: [{ role: 'system', content: \"You write the weekly results summary that a marketing agency's account manager reads before sending reports to two clients. Use plain, friendly English. Never type a digit. Wherever a number goes, write a placeholder from that client's \\\"placeholders\\\" list in curly braces, exactly as named, for example {costPerLead}. Code replaces each placeholder with the value listed next to it, so you can see what the reader will see. Never calculate new numbers. Use only the placeholders of the client you are writing about. The overview covers both clients and has no numbers or placeholders. Placeholders ending in _change already say which way it went (for example \\\"up 5%\\\" or \\\"down 33%\\\"): write \\\"leads were {leads_change} on the previous report\\\", never \\\"leads rose {leads_change}\\\". Outside the curly braces, never write field names such as costPerLead or paidLeads; say \\\"cost per lead\\\" or \\\"paid leads\\\". The data covers last week (Monday to Sunday). Changes compare with the previous report, not with an earlier week: call it \\\"the previous report\\\", never \\\"the previous week\\\" or \\\"the week before\\\". Keep each summary to two or three sentences: say what matters most this week and why, using only the few numbers that support it. Do not list every number; the report shows them all in a table. Explain every warning in client-friendly words, and suggest at most three practical next steps per client. A warning's message contains numbers, so never copy it: explain it in your own words with {<code>_count} (for example {duplicates_count}), or write {<code>_message} on its own to show the check's wording. Stay inside the length limits, counted after the placeholders are filled in: overview one sentence under 200 characters, headline under 90, summary under 600, each warning under 300, each next step under 200. Return JSON that matches the schema exactly. 'clinic' is the clinic, 'store' is the store.\" }, { role: 'user', content: JSON.stringify(aiInput) }],\n  response_format: { type: 'json_schema', json_schema: { name: 'weekly_report', strict: true, schema: AI_SCHEMA } } };\nreturn [{ json: { ...crm, clients, aiInput, aiBody, steps } }];"
+      }
+    },
+    {
+      "id": "78a101e0-4b1d-e2fd-783d-ab7bee583a2d",
+      "name": "Save progress 2",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3960,
+        -300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- show the visitor the checks are done\nwith u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)\nselect 1 as saved",
+        "options": {
+          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.steps)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    },
+    {
+      "id": "e78b6f3e-7a28-5858-04f7-57e90cf8c3d2",
+      "name": "AI: write summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4180,
+        -300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gemini-flash-lite-latest', ...$('Checks').first().json.aiBody }) }}",
+        "options": {
+          "timeout": 45000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OZF5vuPL8kSAiXEF",
+          "name": "Gemini"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "3e9c52a9-133a-f585-e16f-1d7a106a143b",
+      "name": "Check AI answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4400,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst ck = $('Checks').first().json;\nreturn [{ json: { ok: !!pickAiAnswer($input.all().map(i => i.json), ck.aiInput, ck.problems.includes('ai_broken')).value } }];"
+      }
+    },
+    {
+      "id": "8b42e93c-423e-02bf-c5c7-2220faf8ec8f",
+      "name": "AI answer ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4620,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c584f78e-e758-50f5-54f2-2063f0069bba",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "1a9e644a-e76d-476f-4b5c-b23ad1b80277",
+      "name": "AI: second try",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4840,
+        -100
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gemini-flash-latest', ...$('Checks').first().json.aiBody }) }}",
+        "options": {
+          "timeout": 45000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OZF5vuPL8kSAiXEF",
+          "name": "Gemini"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b4f294b3-8b11-8a98-615e-f43b13625806",
+      "name": "Build report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5060,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst ck = $('Checks').first().json;\n// the first model's answer, then the second model's if it was asked\nconst replies = ['AI: write summary', 'AI: second try'].filter(n => $(n).isExecuted).flatMap(n => $(n).all().map(i => i.json));\nconst pick = pickAiAnswer(replies, ck.aiInput, ck.problems.includes('ai_broken'));\nlet steps = ck.steps, ai;\nif (pick.value) { ai = { source: 'ai', value: pick.value }; steps = setStep(steps, 'ai', 'done'); }\nelse {\n  ai = { source: 'template', value: templateSummary(ck.aiInput) };\n  steps = pick.gotAnswer ? setStep(steps, 'ai', 'warning', `AI answer rejected (${pick.errors[0]}); template summary used`)\n    : setStep(steps, 'ai', 'failed', `${pick.errors[0] || 'no AI answer'}; template summary used`);\n}\nconst metaSkipped = ck.clients.reduce((a, c) => a + c.skipped, 0);\nconst report = buildReport({ runId: ck.runId, weekStart: ck.weekStart, clients: ck.clients, steps, ai, problems: ck.problems, metaSkipped });\nreturn [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps } }];"
+      }
+    },
+    {
+      "id": "58a27bed-deef-d95e-1aa1-86d672945a72",
+      "name": "Save result",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        5280,
+        -300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update demo_runs set status = $2, report = $3::jsonb, steps = $4::jsonb where id = $1::uuid returning id",
+        "options": {
+          "queryReplacement": "={{ [$json.runId, $json.status, JSON.stringify($json.report), JSON.stringify($json.steps)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Start report": {
+      "main": [
+        [
+          {
+            "node": "Clinic: read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic: read": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: read": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: read (refused)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: read (refused)": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: read (any refused?)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: read (any refused?)": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: read (pause)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Store: read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: read (pause)": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: read (retry)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: read (retry)": {
+      "main": [
+        [
+          {
+            "node": "Store: read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store: read": {
+      "main": [
+        [
+          {
+            "node": "GHL store: read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: read": {
+      "main": [
+        [
+          {
+            "node": "GHL store: read (refused)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: read (refused)": {
+      "main": [
+        [
+          {
+            "node": "GHL store: read (any refused?)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: read (any refused?)": {
+      "main": [
+        [
+          {
+            "node": "GHL store: read (pause)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "CRM data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: read (pause)": {
+      "main": [
+        [
+          {
+            "node": "GHL store: read (retry)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: read (retry)": {
+      "main": [
+        [
+          {
+            "node": "CRM data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CRM data": {
+      "main": [
+        [
+          {
+            "node": "Save progress 1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save progress 1": {
+      "main": [
+        [
+          {
+            "node": "Meta requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta requests": {
+      "main": [
+        [
+          {
+            "node": "Meta: send conversions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta: send conversions": {
+      "main": [
+        [
+          {
+            "node": "Checks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checks": {
+      "main": [
+        [
+          {
+            "node": "Save progress 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save progress 2": {
+      "main": [
+        [
+          {
+            "node": "AI: write summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: write summary": {
+      "main": [
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check AI answer": {
+      "main": [
+        [
+          {
+            "node": "AI answer ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI answer ok?": {
+      "main": [
+        [
+          {
+            "node": "Build report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI: second try",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: second try": {
+      "main": [
+        [
+          {
+            "node": "Build report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build report": {
+      "main": [
+        [
+          {
+            "node": "Save result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
