@@ -34,6 +34,63 @@
           "name": "Supabase demo"
         }
       }
+    },
+    {
+      "id": "fe2731fd-6693-1179-47e1-2fa86eb986c3",
+      "name": "Slack message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const e = $('On error').first().json.execution ?? {};\nconst text = `:rotating_light: Agency demo run crashed: ${String(e.error?.message ?? 'unknown error').slice(0, 300)} (node: ${e.lastNodeExecuted ?? '?'})\\nRun in n8n: ${e.url ?? 'no link'}`;\nreturn [{ json: { req: { method: 'POST', url: 'https://slack.com/api/chat.postMessage', body: { channel: 'C0CAM97PY1K', text: text } } } }];"
+      }
+    },
+    {
+      "id": "2f91566a-7e15-02a6-1b68-c89162e157f3",
+      "name": "Slack: send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        440,
+        200
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "w72M6Fdba9XCnYo1",
+          "name": "Slack bot"
+        }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -42,6 +99,22 @@
         [
           {
             "node": "Mark run failed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Slack message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack message": {
+      "main": [
+        [
+          {
+            "node": "Slack: send",
             "type": "main",
             "index": 0
           }

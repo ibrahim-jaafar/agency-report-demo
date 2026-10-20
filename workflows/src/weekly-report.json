@@ -757,6 +757,63 @@
           "name": "Supabase demo"
         }
       }
+    },
+    {
+      "id": "a56626fa-3fc5-1aa6-3ae4-c109ce8efcbd",
+      "name": "Slack message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5500,
+        -300
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\n// only when a person should look: a step failed or a check fired\nconst text = alertText($('Build report').first().json.report, 'https://ibrahim-jaafar.github.io/agency-demo/');\nreturn text ? [{ json: { req: { method: 'POST', url: 'https://slack.com/api/chat.postMessage', body: { channel: 'C0CAM97PY1K', text: text } } } }] : [];"
+      }
+    },
+    {
+      "id": "0cb56c64-f50b-d294-f3e3-02053af1f0d6",
+      "name": "Slack: send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5720,
+        -300
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=utf-8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "w72M6Fdba9XCnYo1",
+          "name": "Slack bot"
+        }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
@@ -1039,6 +1096,28 @@
         [
           {
             "node": "Save result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save result": {
+      "main": [
+        [
+          {
+            "node": "Slack message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack message": {
+      "main": [
+        [
+          {
+            "node": "Slack: send",
             "type": "main",
             "index": 0
           }

@@ -100,5 +100,10 @@ test('the weekly report only reads GoHighLevel, and the demo hands over to it', 
   assert.deepEqual(next('All searchable?'), [['Pass it on'], ['Look again soon']]);
   assert.deepEqual(next('Look again soon'), [['Clinic: count']]);
   assert.deepEqual(next('Pass it on'), [['Run the weekly report']]);
+  // Slack: the report posts after it's saved; a crash posts from the error workflow, whether or not a run was marked failed
+  const link = (w, n) => w.connections[n].main.map(o => o.map(c => c.node));
+  assert.deepEqual(link(report, 'Save result'), [['Slack message']]);
+  assert.deepEqual(link(report, 'Slack message'), [['Slack: send']]);
+  assert.deepEqual(link(wf('error-handler'), 'On error'), [['Mark run failed', 'Slack message']]);
   for (const n of ['Meta: send conversions', 'AI: write summary', 'Checks']) assert.ok(!demo.nodes.some(x => x.name === n) && report.nodes.some(x => x.name === n), n);
 });

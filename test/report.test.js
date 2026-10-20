@@ -59,3 +59,18 @@ test('meta_mismatch with nothing to skip is not applicable, not missed', () => {
   assert.deepEqual(base({ problems: ['meta_mismatch'], metaSkipped: 0 }).injected, [{ problem: 'meta_mismatch', caught: null }]);
   assert.deepEqual(base({ problems: ['meta_mismatch'], metaSkipped: 2 }).injected, [{ problem: 'meta_mismatch', caught: false }]);
 });
+
+test('alertText: nothing when all is well; failed steps and warnings when not', async () => {
+  const { alertText } = await import('../lib/report.js');
+  const ok = buildReport({ runId: 'r', weekStart: W, clients: clients(), steps: steps(), ai: ai(), problems: [] });
+  assert.equal(alertText(ok, 'L'), null);
+  const w = { code: 'duplicates', count: 2, message: '2 leads look like duplicates' };
+  const bad = buildReport({ runId: 'r', weekStart: W, clients: clients([w]), steps: steps('meta'), ai: ai(), problems: ['duplicates'] });
+  const t = alertText(bad, 'L').split('\n');
+  assert.match(t[0], /week of 2026-10-12, needs a look \(demo: the visitor chose/);
+  assert.equal(t[1], '• Sending conversions to Meta failed: down');
+  assert.match(t[2], /^• .+: 2 leads look like duplicates$/);
+  assert.equal(t.at(-1), 'Report: L');
+  const real = buildReport({ runId: 'r', weekStart: W, clients: clients([w]), steps: steps(), ai: ai(), problems: [] });
+  assert.doesNotMatch(alertText(real, 'L'), /demo/);
+});

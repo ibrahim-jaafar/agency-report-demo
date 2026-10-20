@@ -141,6 +141,13 @@ const refuse = [
   { name: 'Respond refused', y: 300, type: 'n8n-nodes-base.respondToWebhook', v: 1.1, params: { respondWith: 'json', responseBody: '={{ JSON.stringify($json.body) }}', options: { responseCode: '={{ $json.code }}' } } },
 ];
 
+// Slack alerts, built only once the Slack bot credential exists in n8n (N8N_CRED_SLACK and SLACK_CHANNEL in .env).
+// The bot token stays in that credential; a failed Slack post never stops a report (onError: continue).
+for (const k of ['N8N_CRED_SLACK', 'SLACK_CHANNEL']) env[k] ??= process.env[k]; // ponytail: env override only to test the build
+const SLACK = !!(env.N8N_CRED_SLACK && env.SLACK_CHANNEL);
+const slackReq = textVar => `{ method: 'POST', url: 'https://slack.com/api/chat.postMessage', body: { channel: '${env.SLACK_CHANNEL}', text: ${textVar} } }`;
+const slackSend = y => http('Slack: send', header('N8N_CRED_SLACK', 'Slack bot'), { headers: [['Content-Type', 'application/json; charset=utf-8']], y });
+
 // How many of this run's contacts each client's search finds; checked every 5 s, at most CATCH_UP_TRIES times.
 const CATCH_UP_TRIES = 12;
 const countReq = c => `{ method: 'POST', url: '${GHL}/contacts/search', body: { locationId: '${CLIENTS[c].location}', pageLimit: 1, filters: [{ field: 'tags', operator: 'eq', value: $('Hand over').first().json.select.tag }] } }`;
@@ -411,6 +418,11 @@ const report = [
     "return [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps } }];"], -300), alsoFrom: ['AI answer ok?', 0] },
   sql('Save result', 'update demo_runs set status = $2, report = $3::jsonb, steps = $4::jsonb where id = $1::uuid returning id',
     '={{ [$json.runId, $json.status, JSON.stringify($json.report), JSON.stringify($json.steps)] }}', -300),
+  ...(SLACK ? [
+    codeNode('Slack message', ['/*@lib*/', '// only when a person should look: a step failed or a check fired',
+      "const text = alertText($('Build report').first().json.report, 'https://ibrahim-jaafar.github.io/agency-demo/');",
+      `return text ? [{ json: { req: ${slackReq('text')} } }] : [];`], -300),
+    slackSend(-300)] : []),
 ];
 
 // ---------- cleanup (demo only): after the report is saved, delete demo contacts older than 7 days (GoHighLevel removes their deals too) ----------
@@ -457,6 +469,12 @@ const errorHandler = workflow('error-handler', [
   { name: 'On error', type: 'n8n-nodes-base.errorTrigger', v: 1, params: {} },
   sql('Mark run failed', "update demo_runs set status = 'failed', error = $1 where status = 'running' returning id",
     "={{ [String($json.execution?.error?.message ?? 'unknown error').slice(0, 500) + ' (node: ' + ($json.execution?.lastNodeExecuted ?? '?') + ')'] }}"),
+  ...(SLACK ? [
+    { branch: ['On error', 0], x: 220 },
+    codeNode('Slack message', ["const e = $('On error').first().json.execution ?? {};",
+      "const text = `:rotating_light: Agency demo run crashed: ${String(e.error?.message ?? 'unknown error').slice(0, 300)} (node: ${e.lastNodeExecuted ?? '?'})\\nRun in n8n: ${e.url ?? 'no link'}`;",
+      `return [{ json: { req: ${slackReq('text')} } }];`], 200),
+    slackSend(200)] : []),
 ]);
 
 for (const wf of [demoRun, weeklyReport, demoStatus, errorHandler]) writeFileSync(new URL(`../workflows/src/${wf.name}.json`, import.meta.url), JSON.stringify(wf, null, 2) + '\n');
