@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-export const LIB_ORDER = ['rng', 'scenario', 'leads', 'spend', 'kpis', 'checks', 'meta', 'ai', 'limits', 'report'];
+export const LIB_ORDER = ['rng', 'scenario', 'leads', 'spend', 'kpis', 'daily', 'checks', 'meta', 'ai', 'limits', 'report'];
 const MARKER = '/*@lib*/';
 
 export function libSource() {

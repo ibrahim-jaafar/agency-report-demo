@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { LIB_ORDER, libSource, buildWorkflow, buildAll } from '../scripts/build-workflows.mjs';
 
 test('lib order is fixed and complete', () => {
-  assert.deepEqual(LIB_ORDER, ['rng', 'scenario', 'leads', 'spend', 'kpis', 'checks', 'meta', 'ai', 'limits', 'report']);
+  assert.deepEqual(LIB_ORDER, ['rng', 'scenario', 'leads', 'spend', 'kpis', 'daily', 'checks', 'meta', 'ai', 'limits', 'report']);
 });
 
 test('lib source has no import/export and defines every function in one scope', () => {

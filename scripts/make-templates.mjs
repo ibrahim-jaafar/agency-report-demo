@@ -377,7 +377,7 @@ const report = [
     '  const kpis = computeKpis(c.client, c.leads, c.spend, weekStart);',
     '  const warnings = runChecks({ client: c.client, leads: c.leads, spend: c.spend, meta, weekStart });',
     '  const previousKpis = prev?.clients?.find(p => p.client === c.client)?.kpis ?? null;',
-    '  return { client: c.client, name: c.name, kpis, previousKpis, warnings, skipped: c.skipped, campaigns: campaignRows(c.spend, c.leads, weekStart) };',
+    '  return { client: c.client, name: c.name, kpis, previousKpis, warnings, skipped: c.skipped, campaigns: campaignRows(c.spend, c.leads, weekStart), days: runDays(c.client, c.leads, c.spend, weekStart) };',
     '});',
     "steps = setStep(steps, 'meta', metaFailed.length ? 'failed' : 'done', metaFailed.join('; ') || undefined);",
     "steps = setStep(steps, 'checks', 'done');",

@@ -83,3 +83,11 @@ test('each client carries its campaigns, or null when it has none', () => {
   assert.deepEqual(r.clients[0].campaigns, camps);
   assert.equal(r.clients[1].campaigns, null);
 });
+
+test('each client carries its days, or null when it has none', () => {
+  const cs = clients();
+  cs[0].days = [{ day: '2026-10-12', leads: 2 }];
+  const r = base({ clients: cs });
+  assert.deepEqual(r.clients[0].days, [{ day: '2026-10-12', leads: 2 }]);
+  assert.equal(r.clients[1].days, null);
+});
