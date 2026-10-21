@@ -129,3 +129,14 @@ test('cost per click moves from day to day in the run week', () => {
   const cpc = runDays('store', leads, spend, W).map(d => d.spend / d.clicks);
   assert.ok(Math.max(...cpc) - Math.min(...cpc) > 0.05, `spread ${Math.max(...cpc) - Math.min(...cpc)}`);
 });
+
+test('live uses the run’s real day for "same time last week" when it has one', () => {
+  const run = [{ day: '2026-10-14', leads: 6, paidLeads: 5, conversions: 2, cancelled: 0, revenue: 300, spend: 29.24, impressions: 3000, clicks: 40 }];
+  const end = liveToday('clinic', new Date(Date.UTC(2026, 9, 21, 23, 59, 59, 999)), run);
+  assert.equal(end.lastWeek.totals.leads, 6);
+  assert.equal(end.lastWeek.totals.spend, 29.24);
+  assert.equal(end.lastWeek.hours.length, 24);
+  assert.equal(end.lastWeek.hours.reduce((a, h) => a + h.leads, 0), 6);
+  // without run rows it is the made-up day, as before
+  assert.equal(liveToday('clinic', new Date(Date.UTC(2026, 9, 21, 23, 59, 59, 999))).lastWeek.totals.leads, historyDay('clinic', '2026-10-14').leads);
+});
