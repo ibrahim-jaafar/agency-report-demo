@@ -117,3 +117,25 @@ test('joinPages: joins pages, drops repeats, flags a cut-off list, refuses a fai
   assert.equal(joinPages([], 'contacts', 10, 2), null);
   assert.deepEqual(joinPages([{ statusCode: 200, body: {} }], 'contacts', 10, 2).rows, []);
 });
+
+test('leads arrive mostly in the daytime and evening, like real enquiries', () => {
+  let day = 0, all = 0;
+  for (let s = 0; s < 60; s++) for (const l of generateLeads('store', [], makeRng(s), W)) {
+    const h = new Date(l.createdAt).getUTCHours();
+    if (h >= 7 && h <= 22) day++;
+    all++;
+  }
+  assert.ok(day / all > 0.85, `daytime share ${(day / all).toFixed(2)}`);
+});
+
+test('a duplicate comes in later than the original, still inside the week', () => {
+  for (let s = 0; s < 40; s++) {
+    const leads = generateLeads('clinic', ['duplicates'], makeRng(s), W);
+    for (const d of leads.filter(l => l.flags.includes('duplicates'))) {
+      const orig = leads.find(l => !l.flags.includes('duplicates') && l.firstName === d.firstName && l.lastName === d.lastName && l.email.toLowerCase() === d.email.toLowerCase());
+      assert.ok(orig, 'original found');
+      assert.ok(Date.parse(d.createdAt) > Date.parse(orig.createdAt), 'later');
+      assert.ok(Date.parse(d.createdAt) < +W + 7 * 864e5, 'inside the week');
+    }
+  }
+});

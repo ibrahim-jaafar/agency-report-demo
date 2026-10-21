@@ -91,3 +91,11 @@ test('each client carries its days, or null when it has none', () => {
   assert.deepEqual(r.clients[0].days, [{ day: '2026-10-12', leads: 2 }]);
   assert.equal(r.clients[1].days, null);
 });
+
+test('each client carries its leads list, or null', () => {
+  const cs = clients();
+  cs[0].leadList = [{ name: 'Sara H.', source: 'Ads', outcome: 'open', value: 0, createdAt: '2026-10-13T10:00:00.000Z', duplicate: false }];
+  const r = base({ clients: cs });
+  assert.equal(r.clients[0].leadList[0].name, 'Sara H.');
+  assert.equal(r.clients[1].leadList, null);
+});
