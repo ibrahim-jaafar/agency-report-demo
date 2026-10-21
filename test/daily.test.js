@@ -123,3 +123,9 @@ test('live today only grows through the day and never passes the full day', () =
   assert.equal(noon.hours.length, 13);
   assert.equal(noon.lastWeek.day, '2026-10-14');
 });
+
+test('cost per click moves from day to day in the run week', () => {
+  const leads = generateLeads('store', [], makeRng(3), W), spend = simulateSpend('store', leads, [], makeRng(3));
+  const cpc = runDays('store', leads, spend, W).map(d => d.spend / d.clicks);
+  assert.ok(Math.max(...cpc) - Math.min(...cpc) > 0.05, `spread ${Math.max(...cpc) - Math.min(...cpc)}`);
+});
