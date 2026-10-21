@@ -227,3 +227,16 @@ test('the week is compared with the previous week, from the same daily figures a
   const k = previousWeekKpis('clinic', W);
   assert.deepEqual(k, kpisFromTotals('clinic', sumDays(daySeries('clinic', '2026-10-05', '2026-10-11'))));
 });
+
+test('the duplicate mark goes on the later copy, whatever order the CRM returns the leads in', () => {
+  for (let s = 0; s < 20; s++) {
+    const leads = generateLeads('store', ['duplicates'], makeRng(s), W);
+    for (const order of [leads, [...leads].reverse()]) {
+      const list = leadList(order, W);
+      for (const d of list.filter(l => l.duplicate)) {
+        const twin = list.find(l => !l.duplicate && l.name === d.name);
+        if (twin) assert.ok(d.createdAt > twin.createdAt, `${d.name}: the copy is the later one`);
+      }
+    }
+  }
+});

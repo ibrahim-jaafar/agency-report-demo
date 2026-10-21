@@ -5,7 +5,7 @@ import { generateLeads } from '../lib/leads.js';
 import { simulateSpend } from '../lib/spend.js';
 import { computeKpis } from '../lib/kpis.js';
 import { runChecks } from '../lib/checks.js';
-import { AI_SCHEMA, LABELS, COUNT_LABELS, placeholderGuide, buildAiInput, validateAiOutput, pickAiAnswer, templateDraft, templateSummary } from '../lib/ai.js';
+import { AI_SCHEMA, LABELS, COUNT_LABELS, placeholderGuide, buildAiInput, validateAiOutput, pickAiAnswer, templateDraft, templateSummary, placeholderValues } from '../lib/ai.js';
 
 const W = new Date('2026-10-12T00:00:00Z');
 const NAMES = { clinic: 'Lumière Skin Clinic', store: 'Northwind Home' };
@@ -209,4 +209,9 @@ test('every KPI and warning has a label, and the AI guide shows each one', () =>
     const errors = validateAiOutput(o, input).errors || [];
     assert.deepEqual(errors.filter(e => /near it|right after/.test(e)), [], l.example);
   }
+});
+
+test('return on ad spend reads with its ×', () => {
+  const v = placeholderValues({ kpis: { roas: 3.21 }, changes: null, warnings: [] });
+  assert.equal(v.roas, '3.21×');
 });
