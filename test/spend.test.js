@@ -30,5 +30,22 @@ test('bad_totals makes reportedTotal differ from the sum by 5-20%', () => {
     const s = simulateSpend('store', generateLeads('store', [], makeRng(i), W), ['bad_totals'], makeRng(i));
     const diff = Math.abs(s.reportedTotal - sum(s)) / sum(s);
     assert.ok(diff >= 0.049 && diff <= 0.201, `diff ${diff}`);
+    assert.ok(s.campaigns.every(c => c.clicks > 0));
+  }
+});
+
+test('impressions and clicks agree with spend', () => {
+  for (let i = 0; i < 50; i++) for (const client of ['clinic', 'store']) {
+    const leads = generateLeads(client, ['missing_source'], makeRng(i), W);
+    const s = simulateSpend(client, leads, [], makeRng(i));
+    for (const c of s.campaigns) {
+      assert.ok(Number.isInteger(c.impressions) && Number.isInteger(c.clicks));
+      assert.ok(c.clicks < c.impressions);
+      const ctr = c.clicks / c.impressions;
+      assert.ok(ctr >= 0.0095 && ctr <= 0.0305, `ctr ${ctr}`);
+      // clicks are whole numbers, so allow half a click of rounding either way
+      assert.ok(c.spend / (c.clicks + 0.5) <= 1.5 && c.spend / (c.clicks - 0.5) >= 0.6, `cpc ${c.spend / c.clicks}`);
+      assert.ok(c.clicks > c.paidLeads);
+    }
   }
 });

@@ -52,3 +52,21 @@ test('money rounded to cents', () => {
   const k = computeKpis('clinic', [lead(), lead(), lead()], spend(100), W);
   assert.equal(k.costPerLead, 33.33);
 });
+
+test('impressions, clicks and cost per click come from the campaigns', () => {
+  const sp = { campaigns: [{ name: 'Ads', spend: 100, paidLeads: 0, impressions: 5000, clicks: 90 }, { name: 'B', spend: 20, paidLeads: 0, impressions: 1000, clicks: 30 }], reportedTotal: 120, simulated: true };
+  for (const client of ['clinic', 'store']) {
+    const k = computeKpis(client, [lead()], sp, W);
+    assert.equal(k.impressions, 6000);
+    assert.equal(k.clicks, 120);
+    assert.equal(k.costPerClick, 1);
+  }
+  const odd = computeKpis('store', [], { campaigns: [{ name: 'A', spend: 10, paidLeads: 0, impressions: 300, clicks: 7 }], reportedTotal: 10 }, W);
+  assert.equal(odd.costPerClick, Math.round(10 / 7 * 100) / 100);
+});
+
+test('no clicks gives a null cost per click', () => {
+  const k = computeKpis('clinic', [], { campaigns: [{ name: 'A', spend: 10, paidLeads: 0, impressions: 0, clicks: 0 }], reportedTotal: 10 }, W);
+  assert.equal(k.costPerClick, null);
+  assert.equal(computeKpis('clinic', [], spend(10), W).costPerClick, null);
+});
