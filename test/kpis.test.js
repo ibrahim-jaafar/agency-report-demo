@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeKpis } from '../lib/kpis.js';
+import { computeKpis, campaignRows } from '../lib/kpis.js';
 
 const W = new Date('2026-10-12T00:00:00Z');
 const T = '2026-10-13T10:00:00.000Z';
@@ -69,4 +69,14 @@ test('no clicks gives a null cost per click', () => {
   const k = computeKpis('clinic', [], { campaigns: [{ name: 'A', spend: 10, paidLeads: 0, impressions: 0, clicks: 0 }], reportedTotal: 10 }, W);
   assert.equal(k.costPerClick, null);
   assert.equal(computeKpis('clinic', [], spend(10), W).costPerClick, null);
+});
+
+test('campaign leads are counted like the paid-leads card: CRM leads inside the week', () => {
+  const sp = { campaigns: [{ name: 'Ads', spend: 50, paidLeads: 9, impressions: 3000, clicks: 60 }, { name: 'B', spend: 20, paidLeads: 9, impressions: 900, clicks: 20 }], reportedTotal: 70 };
+  const leads = [lead(), lead(), lead({ source: 'B' }), lead({ source: 'organic' }), lead({ createdAt: '2026-10-19T00:00:00.000Z' })];
+  const rows = campaignRows(sp, leads, W);
+  assert.deepEqual(rows.map(r => [r.name, r.paidLeads]), [['Ads', 2], ['B', 1]]);
+  assert.deepEqual(rows[0], { name: 'Ads', spend: 50, paidLeads: 2, impressions: 3000, clicks: 60 });
+  const k = computeKpis('clinic', leads, sp, W);
+  assert.equal(rows.reduce((a, r) => a + r.paidLeads, 0), k.paidLeads);
 });
