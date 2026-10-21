@@ -74,3 +74,12 @@ test('alertText: nothing when all is well; failed steps and warnings when not', 
   const real = buildReport({ runId: 'r', weekStart: W, clients: clients([w]), steps: steps(), ai: ai(), problems: [] });
   assert.doesNotMatch(alertText(real, 'L'), /demo/);
 });
+
+test('each client carries its campaigns, or null when it has none', () => {
+  const camps = [{ name: 'Botox Spring', spend: 50, paidLeads: 2, impressions: 4000, clicks: 60 }];
+  const cs = clients();
+  cs[0].campaigns = camps;
+  const r = base({ clients: cs });
+  assert.deepEqual(r.clients[0].campaigns, camps);
+  assert.equal(r.clients[1].campaigns, null);
+});
