@@ -5,7 +5,8 @@ A weekly marketing report built with n8n: leads from GoHighLevel, conversions se
 ## What is live and what is made up
 
 - **Live:** the n8n workflow (Render), the run history (Supabase), the leads and deals saved in a GoHighLevel sandbox, the conversions sent to Meta's Conversions API (a demo dataset with no ads; Meta treats them as normal events unless its Test Events tab is open), the data checks and the Gemini summary.
-- **Made up:** the two clients, their leads, the ad spend (simulated per campaign) and the mistakes a visitor chooses.
+- **Made up:** the two clients, their leads, the ad spend, impressions and clicks (simulated per campaign), the mistakes a visitor chooses, the daily history outside the run's week and the live feed.
+- **Dashboard:** the page shows each client on a dashboard with Day, Week, Month, Year and Live views. Week is the run's report. Each run also saves its week day by day (`report.clients[].days`, from `lib/daily.js` `runDays`): leads, conversions and revenue counted from the CRM leads by day, and the week's simulated spend, impressions and clicks shared out over the days so they still add up to the week. Day, Month and Year add up daily rows (the run's real days plus made-up history from `historyDay`, the same every time) and work costs and rates out again from the sums, never averaged. Periods end yesterday (UTC): Day is compared with the same day a week before, Month and Year with the same days of last month or last year. Live is today so far, from the made-up day shared out by an hourly curve, refreshed every 30 s and compared with the same time last week. There is no daily table in Supabase: the server sleeps, so nothing could fill it on a schedule; a real client would store each day's totals and take live numbers from GoHighLevel webhooks and Meta's hourly spend.
 - **Limits:** one run at a time, one a minute, 50 a day. Gemini's free tier allows 20 requests a day per model; each run asks Flash-Lite first (it answers in seconds) and Flash only if Lite's answer fails, so about 20 runs a day get an AI summary and later runs use the template. Flash was left as the backup because on the free tier it often takes over a minute or is overloaded.
 - **AI summary:** the AI never types a number. It writes placeholders such as `{costPerLead}` or `{leads_change}`, and code puts in the real values (`$22.34`, `up 20%`), so a number in the summary can't be wrong. An answer is refused if it types a digit, uses a placeholder that doesn't exist or has no value this week, writes "rose" or "fell" next to a change (the change already says up or down), or is too long once filled in. Each placeholder must also have its own label within a few words of it ("cost per lead was {costPerLead}"), so a real number can't be put under the wrong name; the AI gets a guide made from the same word lists the check uses. The template summary uses the same placeholders and the same check.
 - **GoHighLevel limit:** our sandbox token allows 25 requests per 10 seconds per sub-account (its `X-RateLimit-*` headers say so; the docs say 100) and 10,000 a day. GoHighLevel has no bulk create for contacts or deals, so a run sends one request per record, 2 a second. Anything refused (429) is sent once more after a 10-second pause. Reads page at 2 requests a second too; deals stop paging once they reach back before the report's week.
@@ -14,9 +15,9 @@ A weekly marketing report built with n8n: leads from GoHighLevel, conversions se
 
 ## Code
 
-- `lib/`: the logic (scenario, leads, spend, KPIs, checks, Meta events, AI input, placeholders and their check, report). No dependencies.
+- `lib/`: the logic (scenario, leads, spend, KPIs, daily totals and periods, checks, Meta events, AI input, placeholders and their check, report). No dependencies.
 - `npm test`: runs the tests (`node --test`).
-- `node --test agency-demo/app.test.mjs` (in the portfolio repo): tests the demo page helpers.
+- `node --test agency-demo/app.test.mjs` (in the portfolio repo): tests the demo page helpers (dashboard, periods, charts data, toolbar). 118 logic + 28 page tests.
 - `npm run site`: copies `lib/` into the portfolio's `agency-demo/lib/`.
 
 ## Hosting setup
