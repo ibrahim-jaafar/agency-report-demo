@@ -154,7 +154,7 @@ test('live uses the run’s real day for "same time last week" when it has one',
 
 // ---------- campaigns per day, leads list, previous week ----------
 import { sumCampaigns, leadList } from '../lib/daily.js';
-import { CAMPAIGNS, inPeriod } from '../lib/leads.js';
+import { CAMPAIGNS, CAMPAIGN_SHARE, inPeriod } from '../lib/leads.js';
 import { campaignRows } from '../lib/kpis.js';
 import { runChecks, periodChecks } from '../lib/checks.js';
 
@@ -408,4 +408,44 @@ test('figures for the run’s own 7 days add up to the run', () => {
   const mine = run.leadList.filter(l => l.createdAt >= '2026-10-19');
   assert.ok(mine.every(l => f.leads.includes(l)));
   assert.equal(f.health.fromRun, true);
+});
+
+test('Meta’s misses sit on days that had conversions: no day says Meta recorded fewer than none', () => {
+  const start = new Date('2026-10-16T00:00:00Z');
+  for (let seed = 1; seed <= 40; seed++) for (const client of ['clinic', 'store']) {
+    const leads = generateLeads(client, ['meta_mismatch'], makeRng(seed), start), spend = simulateSpend(client, leads, [], makeRng(seed));
+    const conv = leads.filter(l => inPeriod(l, start) && l.outcome === 'converted').length;
+    const days = runDays(client, leads, spend, start, { accepted: Math.max(0, conv - 2), rejected: 0 });
+    assert.equal(days.reduce((a, d) => a + d.metaMissed, 0), Math.min(2, conv), `seed ${seed}`);
+    for (const d of days) {
+      assert.ok(d.metaMissed <= d.conversions, `${seed} ${client} ${d.day}: ${d.metaMissed} of ${d.conversions}`);
+      for (const w of periodChecks(client, leadList(leads, start).filter(l => l.createdAt.startsWith(d.day)), [d])) assert.doesNotMatch(w.message, /-\d/);
+    }
+  }
+});
+
+test('the account-total gap is shared out by spend: every day and today so far keep a sensible total', () => {
+  const start = new Date('2026-10-16T00:00:00Z');
+  for (let seed = 1; seed <= 30; seed++) {
+    const leads = generateLeads('store', ['bad_totals'], makeRng(seed), start), spend = simulateSpend('store', leads, ['bad_totals'], makeRng(seed));
+    const days = runDays('store', leads, spend, start, null);
+    const gap = Math.round((spend.reportedTotal - spend.campaigns.reduce((a, c) => a + c.spend, 0)) * 100) / 100;
+    assert.ok(near(days.reduce((a, d) => a + d.spendGap, 0), gap), `seed ${seed}`);
+    for (const d of days) assert.ok(d.spend + d.spendGap >= 0, `${seed} ${d.day}`);
+    // the run's own 7 days still give the run's warning
+    assert.ok(periodChecks('store', leadList(leads, start), days).some(w => w.code === 'bad_totals'));
+    // today, early in the day: no negative total in the message
+    const run = { days, leadList: leadList(leads, start), light: 'orange', asOf: '2026-10-22T09:00:00.000Z' };
+    for (const w of periodFigures('store', run, 'day', new Date('2026-10-22T09:00:00Z')).health.warnings) assert.doesNotMatch(w.message, /\$-/, `${seed}`);
+  }
+});
+
+test('over a year, made-up paid leads split by campaign in the same shares as a run’s', () => {
+  for (const client of ['clinic', 'store']) {
+    const ls = daySeries(client, '2025-10-22', '2026-10-21').flatMap(d => historyLeads(client, d.day)).filter(l => l.source && l.source !== 'organic');
+    CAMPAIGNS[client].forEach((name, i) => {
+      const share = ls.filter(l => l.source === name).length / ls.length;
+      assert.ok(Math.abs(share - CAMPAIGN_SHARE[client][i]) < 0.06, `${client} ${name}: ${share.toFixed(3)} vs ${CAMPAIGN_SHARE[client][i]}`);
+    });
+  }
 });

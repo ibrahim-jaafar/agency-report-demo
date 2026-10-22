@@ -526,9 +526,9 @@
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "update demo_runs set report = $2::jsonb where id = $1::uuid returning id",
+        "query": "update demo_runs set report = $2::jsonb where id = $1::uuid and report->>'asOf' = $3 returning id",
         "options": {
-          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.report)] }}"
+          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.report), $('Latest run').first().json.latest.report.asOf] }}"
         }
       },
       "credentials": {
@@ -540,19 +540,32 @@
       "alwaysOutputData": true
     },
     {
-      "id": "47a88cfb-bfa6-3dc9-d16f-18cac176e8b9",
-      "name": "Respond test lead",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1.1,
+      "id": "5ddbfdee-e733-bc1d-00a8-7246ec1cd69f",
+      "name": "Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         3300,
         0
       ],
       "parameters": {
+        "jsCode": "const a = $('Add to the run').first().json;\nif (!a.save) return [{ json: { code: a.code, body: a.body } }];\nif ($input.first().json.id) return [{ json: { code: 200, body: a.body } }];\nreturn [{ json: { code: 409, body: { error: 'Another test lead arrived at the same moment. Please try again.' } } }];"
+      }
+    },
+    {
+      "id": "47a88cfb-bfa6-3dc9-d16f-18cac176e8b9",
+      "name": "Respond test lead",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3520,
+        0
+      ],
+      "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($('Add to the run').first().json.body) }}",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
         "options": {
-          "responseCode": "={{ $('Add to the run').first().json.code }}"
+          "responseCode": "={{ $json.code }}"
         }
       }
     },
@@ -805,7 +818,7 @@
         ],
         [
           {
-            "node": "Respond test lead",
+            "node": "Answer",
             "type": "main",
             "index": 0
           }
@@ -813,6 +826,17 @@
       ]
     },
     "Save the run": {
+      "main": [
+        [
+          {
+            "node": "Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer": {
       "main": [
         [
           {

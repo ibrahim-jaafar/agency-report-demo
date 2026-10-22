@@ -126,3 +126,13 @@ test('every Code node compiles once the lib is pasted in: no name in a node clas
     }
   }
 });
+
+test('a test lead goes through GoHighLevel, then Meta only when it converted, and saves only an unchanged run', () => {
+  const w = JSON.parse(readFileSync(new URL('../workflows/src/demo-lead.json', import.meta.url), 'utf8'));
+  const next = n => w.connections[n].main.map(o => o.map(c => c.node));
+  assert.deepEqual(next('Allowed?'), [['Clinic?'], ['Respond refused']]);
+  assert.deepEqual(next('Clinic?'), [['Clinic: test contact'], ['Store: test contact']]);
+  assert.deepEqual(next('To Meta?'), [['Meta: send test conversion'], ['Add to the run']]);
+  assert.deepEqual(next('Save it?'), [['Save the run'], ['Answer']]);
+  assert.match(w.nodes.find(n => n.name === 'Save the run').parameters.query, /and report->>'asOf' = \$3/);
+});
