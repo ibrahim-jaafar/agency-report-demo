@@ -87,15 +87,25 @@ test('the week of daily totals matches the weekly report', () => {
   for (const key of ['spend', 'leads', 'paidLeads', 'costPerLead', 'cancelled', 'bookings', 'costPerBooking', 'bookingRate', 'impressions', 'clicks', 'costPerClick']) assert.equal(d[key], k[key], key);
 });
 
-test('each period has a range and a fair comparison', () => {
-  const today = '2026-10-21', weekStart = '2026-10-12';
-  assert.deepEqual(periodRange('day', today, weekStart), { from: '2026-10-20', to: '2026-10-20', cmp: { from: '2026-10-13', to: '2026-10-13' } });
-  assert.deepEqual(periodRange('week', today, weekStart), { from: '2026-10-12', to: '2026-10-18', cmp: { from: '2026-10-05', to: '2026-10-11' } });
-  assert.deepEqual(periodRange('month', today, weekStart), { from: '2026-10-01', to: '2026-10-20', cmp: { from: '2026-09-01', to: '2026-09-20' } });
-  assert.deepEqual(periodRange('year', today, weekStart), { from: '2026-01-01', to: '2026-10-20', cmp: { from: '2025-01-01', to: '2025-10-20' } });
-  // on the 1st, "month" is the whole month that just ended; the same days a month earlier stay inside that month
-  assert.deepEqual(periodRange('month', '2026-04-01', weekStart), { from: '2026-03-01', to: '2026-03-31', cmp: { from: '2026-02-01', to: '2026-02-28' } });
-  assert.deepEqual(periodRange('year', '2025-03-01', weekStart).cmp, { from: '2024-01-01', to: '2024-02-28' });
+test('each period is the current one so far, compared with the same stretch before', () => {
+  const today = '2026-10-22'; // a Thursday
+  assert.deepEqual(periodRange('day', today), { from: today, to: today, current: true, cmp: { from: '2026-10-15', to: '2026-10-15' } });
+  assert.deepEqual(periodRange('week', today), { from: '2026-10-19', to: today, current: true, cmp: { from: '2026-10-12', to: '2026-10-15' } });
+  assert.deepEqual(periodRange('month', today), { from: '2026-10-01', to: today, current: true, cmp: { from: '2026-09-01', to: '2026-09-22' } });
+  assert.deepEqual(periodRange('year', today), { from: '2026-01-01', to: today, current: true, cmp: { from: '2025-01-01', to: '2025-10-22' } });
+  // the same days a month earlier stay inside that month
+  assert.deepEqual(periodRange('month', '2026-03-31').cmp, { from: '2026-02-01', to: '2026-02-28' });
+});
+
+test('stepping back gives whole earlier periods, compared with the whole one before', () => {
+  const today = '2026-10-22';
+  assert.deepEqual(periodRange('day', today, 1), { from: '2026-10-21', to: '2026-10-21', current: false, cmp: { from: '2026-10-14', to: '2026-10-14' } });
+  assert.deepEqual(periodRange('week', today, 1), { from: '2026-10-12', to: '2026-10-18', current: false, cmp: { from: '2026-10-05', to: '2026-10-11' } });
+  assert.deepEqual(periodRange('month', today, 1), { from: '2026-09-01', to: '2026-09-30', current: false, cmp: { from: '2026-08-01', to: '2026-08-31' } });
+  assert.deepEqual(periodRange('month', '2026-03-31', 1), { from: '2026-02-01', to: '2026-02-28', current: false, cmp: { from: '2026-01-01', to: '2026-01-31' } });
+  assert.deepEqual(periodRange('year', today, 1), { from: '2025-01-01', to: '2025-12-31', current: false, cmp: { from: '2024-01-01', to: '2024-12-31' } });
+  // a week that crosses into a new year
+  assert.deepEqual(periodRange('week', '2026-01-02', 0).from, '2025-12-29');
 });
 
 test('the run days replace the made-up days of the same dates', () => {
@@ -122,7 +132,7 @@ test('live today only grows through the day and never passes the full day', () =
   assert.equal(end.totals.leads, full.leads);
   const noon = liveToday('clinic', new Date(Date.UTC(2026, 9, 21, 12, 30)));
   assert.equal(noon.hours.length, 13);
-  assert.equal(noon.lastWeek.day, '2026-10-14');
+  assert.equal(noon.before.day, '2026-10-14');
 });
 
 test('cost per click moves from day to day in the run week', () => {
@@ -134,12 +144,12 @@ test('cost per click moves from day to day in the run week', () => {
 test('live uses the run’s real day for "same time last week" when it has one', () => {
   const run = [{ day: '2026-10-14', leads: 6, paidLeads: 5, conversions: 2, cancelled: 0, revenue: 300, spend: 29.24, impressions: 3000, clicks: 40 }];
   const end = liveToday('clinic', new Date(Date.UTC(2026, 9, 21, 23, 59, 59, 999)), run);
-  assert.equal(end.lastWeek.totals.leads, 6);
-  assert.equal(end.lastWeek.totals.spend, 29.24);
-  assert.equal(end.lastWeek.hours.length, 24);
-  assert.equal(end.lastWeek.hours.reduce((a, h) => a + h.leads, 0), 6);
+  assert.equal(end.before.totals.leads, 6);
+  assert.equal(end.before.totals.spend, 29.24);
+  assert.equal(end.before.hours.length, 24);
+  assert.equal(end.before.hours.reduce((a, h) => a + h.leads, 0), 6);
   // without run rows it is the made-up day, as before
-  assert.equal(liveToday('clinic', new Date(Date.UTC(2026, 9, 21, 23, 59, 59, 999))).lastWeek.totals.leads, historyDay('clinic', '2026-10-14').leads);
+  assert.equal(liveToday('clinic', new Date(Date.UTC(2026, 9, 21, 23, 59, 59, 999))).before.totals.leads, historyDay('clinic', '2026-10-14').leads);
 });
 
 // ---------- campaigns per day, leads list, previous week ----------
@@ -275,8 +285,8 @@ test('live uses the run’s own leads for last week when it has them', () => {
   const leads = generateLeads('clinic', [], makeRng(2), W), spend = simulateSpend('clinic', leads, [], makeRng(2));
   const rows = runDays('clinic', leads, spend, W), list = leadList(leads, W);
   const l = liveToday('clinic', new Date(Date.UTC(2026, 9, 21, 23, 59, 59, 999)), rows, list);
-  assert.equal(l.lastWeek.totals.leads, rows.find(r => r.day === '2026-10-14').leads);
-  assert.equal(l.lastWeek.totals.revenue, rows.find(r => r.day === '2026-10-14').revenue);
+  assert.equal(l.before.totals.leads, rows.find(r => r.day === '2026-10-14').leads);
+  assert.equal(l.before.totals.revenue, rows.find(r => r.day === '2026-10-14').revenue);
 });
 
 test('a period’s leads: the run’s own on its days, made-up people on the rest', () => {
@@ -304,4 +314,13 @@ test('run leads split over campaigns like the history does', () => {
   for (let s = 0; s < 300; s++) for (const l of generateLeads('clinic', [], makeRng(s), W)) if (l.source !== 'organic') n[l.source] = (n[l.source] || 0) + 1;
   const total = Object.values(n).reduce((a, x) => a + x, 0);
   assert.ok(n['Botox Spring'] / total > 0.38 && n['Skin Consultation'] / total < 0.28, JSON.stringify(n));
+});
+
+test('made-up months swing about as much as chance allows, not together', () => {
+  for (const client of ['clinic', 'store']) {
+    const ms = Array.from({ length: 24 }, (_, i) => sumDays(daySeries(client, dayKey(Date.UTC(2024, i + 10, 1)), dayKey(Date.UTC(2024, i + 11, 0)))).leads);
+    const m = ms.reduce((a, b) => a + b) / ms.length, v = ms.reduce((a, x) => a + (x - m) ** 2, 0) / (ms.length - 1);
+    // chance alone gives about 1; the trend and seasons add a little. Unmixed seeds gave the clinic 2.25.
+    assert.ok(v / m < 2, `${client}: ${(v / m).toFixed(2)}`);
+  }
 });
