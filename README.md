@@ -20,7 +20,7 @@ A marketing report built with n8n: leads from GoHighLevel, conversions sent to M
 
 - `lib/`: the logic (scenario, leads, spend, KPIs, daily totals, periods and their figures, checks, Meta events, AI input, placeholders and their check, report, test leads). No dependencies.
 - `npm test`: runs the tests (`node --test`).
-- `node --test agency-demo/app.test.mjs` (in the portfolio repo): tests the demo page helpers (dashboard, periods, charts data, toolbar). 150 logic + 49 page tests.
+- `node --test agency-demo/app.test.mjs` (in the portfolio repo): tests the demo page helpers (dashboard, periods, charts data, toolbar). 151 logic + 49 page tests.
 - `npm run site`: copies `lib/` into the portfolio's `agency-demo/lib/`.
 
 ## Hosting setup

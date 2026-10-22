@@ -78,6 +78,36 @@ test("pages() groups paged replies by request and puts a retried request's pages
   assert.deepEqual(pages('N').map(r => r.map(x => x.p ?? x.statusCode)), [['c1', 'c2'], ['d1', 429]]);
 });
 
+test('the report reads GoHighLevel again while its search finds fewer contacts than the run saved', () => {
+  const tpl = JSON.parse(readFileSync(new URL('../workflows/src/weekly-report.json', import.meta.url), 'utf8'));
+  const next = n => tpl.connections[n].main.map(o => o.map(c => c.node));
+  assert.deepEqual(next('CRM data'), [['Read everything?']]);
+  assert.deepEqual(next('Read everything?'), [['Save progress 1'], ['Read again soon']]);
+  assert.deepEqual(next('Read again soon'), [['Clinic: read']]);
+  const code = buildWorkflow(tpl, libSource()).nodes.find(n => n.name === 'CRM data').parameters.jsCode;
+  const steps = [{ key: 'ghl', status: 'done' }, { key: 'spend', status: 'pending' }, { key: 'meta', status: 'pending' }];
+  const job = { runId: 'r', problems: [], weekStart: '2026-10-12T00:00:00.000Z', ranAt: '2026-10-19T00:00:00.000Z', steps,
+    spend: { clinic: {}, store: {} }, select: { tag: 'run:r' }, saved: { clinic: 1, store: 2 } };
+  const contact = id => ({ id, firstName: 'A', tags: ['created:1792000000000'] });
+  const run = (storeContacts, runIndex, saved = job.saved) => {
+    const reads = { Clinic: [contact('c1')], Store: storeContacts };
+    const nodes = { 'Start report': [{ json: { ...job, saved } }] };
+    for (const [label, cs] of Object.entries(reads)) {
+      const c = label.toLowerCase();
+      nodes[`${label}: read`] = [{ json: { kind: 'contacts' } }, { json: { kind: 'deals' } }];
+      nodes[`GHL ${c}: read`] = [{ json: { statusCode: 200, body: { contacts: cs } }, pairedItem: { item: 0 } }, { json: { statusCode: 200, body: { opportunities: [] } }, pairedItem: { item: 1 } }];
+    }
+    const $ = n => ({ all: () => nodes[n], first: () => nodes[n][0], isExecuted: n in nodes });
+    return new Function('$', '$runIndex', 'require', code)($, runIndex, () => ({ createHash: () => ({ update: () => ({ digest: () => 'h' }) }) }))[0].json;
+  };
+  assert.equal(run([contact('s1')], 0).again, true);
+  const last = run([contact('s1')], 5);
+  assert.ok(!last.again);
+  assert.deepEqual(last.steps[0], { key: 'ghl', status: 'warning', reason: "Northwind Home: GoHighLevel's search found 1 of the 2 contacts saved" });
+  assert.ok(!run([contact('s1'), contact('s2')], 0).again);
+  assert.ok(!run([contact('s1')], 0, null).again, 'a real client has no saved count, so one read is enough');
+});
+
 test("only the report's reads page through GoHighLevel; saves send one request each", () => {
   const wf = name => JSON.parse(readFileSync(new URL(`../workflows/src/${name}.json`, import.meta.url), 'utf8'));
   const paged = w => wf(w).nodes.filter(n => n.parameters.options?.pagination).map(n => n.name);

@@ -108,6 +108,8 @@ const NOOP = ["// ponytail: one harmless lookup when there's nothing to save (n8
 const NAMES = `const NAMES = ${JSON.stringify({ clinic: [CLIENTS.clinic.label, CLIENTS.clinic.name], store: [CLIENTS.store.label, CLIENTS.store.name] })};`;
 // deploy.mjs puts in the report workflow's real id (n8n only gives one once it exists)
 const REPORT_ID = 'weekly-report';
+// The report reads again, 5 s apart, while search finds fewer of the run's contacts than were saved; at most READ_TRIES reads.
+const READ_TRIES = 6;
 
 const STEP_HELPERS = [
   'const setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);',
@@ -303,7 +305,7 @@ const readCode = c => [
 
 const report = [
   { name: 'Start report', y: -300, type: 'n8n-nodes-base.executeWorkflowTrigger', v: 1.1, params: { inputSource: 'passthrough' } },
-  codeNode('Clinic: read', readCode('clinic'), -300),
+  { ...codeNode('Clinic: read', readCode('clinic'), -300), alsoFrom: ['Read again soon', 0] },
   ...ghlSave('clinic', 'read', 'Clinic: read', -300),
   afterSave(codeNode('Store: read', readCode('store'), -300), 'clinic', 'read'),
   ...ghlSave('store', 'read', 'Store: read', -300),
@@ -318,7 +320,7 @@ const report = [
     'const nowSec = Math.floor(Date.now() / 1000);',
     'let steps = job.steps;',
     NAMES,
-    'const readNotes = [], out = {};',
+    'const readNotes = [], short = [], out = {};',
     'for (const [client, [label, name]] of Object.entries(NAMES)) {',
     "  const got = pages(`GHL ${client}: read`);",
     "  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || []]));",
@@ -326,6 +328,8 @@ const report = [
     "  const contacts = c?.rows ?? null, deals = d?.rows ?? null;",
     "  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);",
     `  else if (c.more || d.more) readNotes.push(\`\${name}: more than ${MAX_PAGES * PAGE} records; only the first ${MAX_PAGES * PAGE} were read\`);`,
+    "  // the demo reads right after saving, and GoHighLevel's search can still answer with an older list (seen: 19 of 22, after a count of 22)",
+    "  if (contacts && job.saved && contacts.length < job.saved[client]) short.push(`${name}: GoHighLevel's search found ${contacts.length} of the ${job.saved[client]} contacts saved`);",
     '  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));',
     '  const leads = (contacts || []).map(c => {',
     "    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded",
@@ -337,10 +341,14 @@ const report = [
     '  const meta = buildMetaEvents(client, leads, job.problems, nowSec, sha256);',
     '  out[client] = { client, name, leads, spend: job.spend[client], ...meta };',
     '}',
+    `if (short.length && $runIndex < ${READ_TRIES - 1}) return [{ json: { again: true } }];`,
+    "// ponytail: after the last try the report shows what search found, and says so",
+    "if (short.length) { const g = steps.find(s => s.key === 'ghl'); steps = setStep(steps, 'ghl', g.status === 'failed' ? 'failed' : 'warning', [g.reason, ...short].filter(Boolean).join('; ')); }",
     "if (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));",
     "steps = setStep(steps, 'spend', 'done');",
     "steps = setStep(steps, 'meta', 'running');",
     'return [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, ranAt: job.ranAt, clients: out, steps } }];'], -300), 'store', 'read'),
+  { name: 'Read everything?', y: -300, type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ !$json.again }}', sid('read everything')) },
   sql('Save progress 1', [
     '-- show the visitor the CRM step is done',
     'with u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)',
@@ -577,7 +585,10 @@ const testLeadSteps = [
 ];
 
 const demoRun = workflow('demo-run', [...start, ...refuse, ...run, ...catchUpLoop, ...cleanup('clinic', 600), ...cleanup('store', 800)]);
-const weeklyReport = workflow('weekly-report', report);
+const weeklyReport = workflow('weekly-report', [...report,
+  { branch: ['Read everything?', 1], x: 3080 },
+  { name: 'Read again soon', y: -100, type: 'n8n-nodes-base.wait', v: 1.1, params: { resume: 'timeInterval', amount: 5, unit: 'seconds' }, extra: { webhookId: sid('read again') } },
+]);
 
 const demoStatus = workflow('demo-status', [
   { name: 'Status webhook', type: 'n8n-nodes-base.webhook', v: 2, params: { httpMethod: 'GET', path: 'demo/status', responseMode: 'lastNode', options: { allowedOrigins: ORIGIN } }, extra: { webhookId: sid('demo/status') } },

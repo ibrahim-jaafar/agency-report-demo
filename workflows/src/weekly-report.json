@@ -492,7 +492,40 @@
         -300
       ],
       "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst pages = n => { const r = [], put = (items, at) => items.forEach((it, k) => (r[at(it.pairedItem?.item ?? k)] ??= []).push(it.json)); put($(n).all(), i => i); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); idx.forEach(i => { r[i] = []; }); put($(`${n} (retry)`).all(), k => idx[k]); } return r; };\n// The report uses what GoHighLevel has, read back from it, like it would for a real client.\nconst job = $('Start report').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nlet steps = job.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nconst readNotes = [], out = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const got = pages(`GHL ${client}: read`);\n  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || []]));\n  const c = joinPages(r.contacts, 'contacts', 100, 100), d = joinPages(r.deals, 'opportunities', 100, 100);\n  const contacts = c?.rows ?? null, deals = d?.rows ?? null;\n  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);\n  else if (c.more || d.more) readNotes.push(`${name}: more than 10000 records; only the first 10000 were read`);\n  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));\n  const leads = (contacts || []).map(c => {\n    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded\n    const d = dealOf.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  const meta = buildMetaEvents(client, leads, job.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend: job.spend[client], ...meta };\n}\nif (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, ranAt: job.ranAt, clients: out, steps } }];"
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst pages = n => { const r = [], put = (items, at) => items.forEach((it, k) => (r[at(it.pairedItem?.item ?? k)] ??= []).push(it.json)); put($(n).all(), i => i); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); idx.forEach(i => { r[i] = []; }); put($(`${n} (retry)`).all(), k => idx[k]); } return r; };\n// The report uses what GoHighLevel has, read back from it, like it would for a real client.\nconst job = $('Start report').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nlet steps = job.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nconst readNotes = [], short = [], out = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const got = pages(`GHL ${client}: read`);\n  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || []]));\n  const c = joinPages(r.contacts, 'contacts', 100, 100), d = joinPages(r.deals, 'opportunities', 100, 100);\n  const contacts = c?.rows ?? null, deals = d?.rows ?? null;\n  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);\n  else if (c.more || d.more) readNotes.push(`${name}: more than 10000 records; only the first 10000 were read`);\n  // the demo reads right after saving, and GoHighLevel's search can still answer with an older list (seen: 19 of 22, after a count of 22)\n  if (contacts && job.saved && contacts.length < job.saved[client]) short.push(`${name}: GoHighLevel's search found ${contacts.length} of the ${job.saved[client]} contacts saved`);\n  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));\n  const leads = (contacts || []).map(c => {\n    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded\n    const d = dealOf.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  const meta = buildMetaEvents(client, leads, job.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend: job.spend[client], ...meta };\n}\nif (short.length && $runIndex < 5) return [{ json: { again: true } }];\n// ponytail: after the last try the report shows what search found, and says so\nif (short.length) { const g = steps.find(s => s.key === 'ghl'); steps = setStep(steps, 'ghl', g.status === 'failed' ? 'failed' : 'warning', [g.reason, ...short].filter(Boolean).join('; ')); }\nif (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, ranAt: job.ranAt, clients: out, steps } }];"
+      }
+    },
+    {
+      "id": "b21e1db3-3d17-bd0c-31d3-6bf50e783ba2",
+      "name": "Read everything?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3080,
+        -300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "b9c35361-d227-8781-20c8-8fa298436a5f",
+              "leftValue": "={{ !$json.again }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       }
     },
     {
@@ -501,7 +534,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        3080,
+        3300,
         -300
       ],
       "parameters": {
@@ -524,7 +557,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3300,
+        3520,
         -300
       ],
       "parameters": {
@@ -537,7 +570,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        3520,
+        3740,
         -300
       ],
       "parameters": {
@@ -576,7 +609,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3740,
+        3960,
         -300
       ],
       "parameters": {
@@ -589,7 +622,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3960,
+        4180,
         -300
       ],
       "parameters": {
@@ -602,7 +635,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        4180,
+        4400,
         -300
       ],
       "parameters": {
@@ -625,7 +658,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        4400,
+        4620,
         -300
       ],
       "parameters": {
@@ -638,7 +671,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        4620,
+        4840,
         -300
       ],
       "parameters": {
@@ -675,10 +708,37 @@
         }
       },
       "onError": "continueRegularOutput"
+    },
+    {
+      "id": "d10248a9-9a86-a0cc-3748-929051ea5477",
+      "name": "Read again soon",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3080,
+        -100
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "webhookId": "7e2807c7-76c6-ce4a-3084-9ccd58bd1382"
     }
   ],
   "connections": {
     "Start report": {
+      "main": [
+        [
+          {
+            "node": "Clinic: read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read again soon": {
       "main": [
         [
           {
@@ -839,7 +899,25 @@
       "main": [
         [
           {
+            "node": "Read everything?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read everything?": {
+      "main": [
+        [
+          {
             "node": "Save progress 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read again soon",
             "type": "main",
             "index": 0
           }
