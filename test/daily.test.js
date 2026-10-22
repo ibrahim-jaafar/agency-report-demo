@@ -156,7 +156,7 @@ test('live uses the run’s real day for "same time last week" when it has one',
 import { sumCampaigns, leadList, previousWeekKpis } from '../lib/daily.js';
 import { CAMPAIGNS, inPeriod } from '../lib/leads.js';
 import { campaignRows } from '../lib/kpis.js';
-import { runChecks } from '../lib/checks.js';
+import { runChecks, periodChecks } from '../lib/checks.js';
 
 const near = (a, b) => Math.abs(a - b) < 0.005;
 
@@ -191,7 +191,9 @@ test('made-up days are split by campaign too, adding up to the day', () => {
     assert.ok(near(d.campaigns.reduce((a, c) => a + c.spend, 0), d.spend));
     assert.equal(d.campaigns.reduce((a, c) => a + c.clicks, 0), d.clicks);
     assert.equal(d.campaigns.reduce((a, c) => a + c.impressions, 0), d.impressions);
-    assert.equal(d.campaigns.reduce((a, c) => a + c.paidLeads, 0), d.paidLeads);
+    // a lead whose source was lost is paid but in no campaign, as in the runs
+    const lost = historyLeads(client, d.day).filter(l => l.source === null).length;
+    assert.equal(d.campaigns.reduce((a, c) => a + c.paidLeads, 0) + lost, d.paidLeads);
     assert.ok(d.campaigns.every(c => c.spend > 0 && c.clicks <= c.impressions));
   }
   // adding the split didn't change the day's own numbers
@@ -323,4 +325,40 @@ test('made-up months swing about as much as chance allows, not together', () => 
     // chance alone gives about 1; the trend and seasons add a little. Unmixed seeds gave the clinic 2.25.
     assert.ok(v / m < 2, `${client}: ${(v / m).toFixed(2)}`);
   }
+});
+
+// ---------- data health for any period ----------
+test('the dashboard’s checks for the run’s own days give exactly the run’s warnings', () => {
+  const all = ['missing_source', 'duplicates', 'meta_mismatch', 'bad_totals', 'edge_cases'];
+  for (let seed = 1; seed <= 30; seed++) for (const client of ['clinic', 'store']) {
+    const rng = makeRng(seed), problems = all.filter(() => rng() < 0.5);
+    const leads = generateLeads(client, problems, rng, W), spend = simulateSpend(client, leads, problems, rng);
+    const conv = leads.filter(l => inPeriod(l, W) && l.outcome === 'converted').length;
+    const meta = { accepted: Math.max(0, conv - (problems.includes('meta_mismatch') ? 2 : 0)), rejected: problems.includes('edge_cases') ? 1 : 0 };
+    const want = runChecks({ client, leads, spend, meta, weekStart: W });
+    assert.deepEqual(periodChecks(client, leadList(leads, W), runDays(client, leads, spend, W, meta)), want, `seed ${seed} ${client} ${problems}`);
+  }
+});
+
+test('made-up history has the odd problem, about as often as a real account', () => {
+  const days = daySeries('store', '2025-01-01', '2025-12-31'), people = days.flatMap(d => historyLeads('store', d.day));
+  const w = Object.fromEntries(periodChecks('store', people, days).map(x => [x.code, x.count]));
+  // a few lost sources and duplicates a year, the odd huge order, total gap, missed or refused Meta event
+  for (const code of ['missing_source', 'duplicates', 'outlier', 'bad_totals', 'meta_mismatch', 'meta_rejected']) assert.ok(w[code] >= 1, `${code}: ${JSON.stringify(w)}`);
+  assert.ok(w.missing_source < people.length * 0.06 && w.duplicates < people.length * 0.06, JSON.stringify(w));
+  // most single days are clean
+  const clean = days.filter(d => !periodChecks('store', historyLeads('store', d.day), [d]).length).length;
+  assert.ok(clean > days.length * 0.85, `${clean} of ${days.length}`);
+});
+
+test('a made-up duplicate is the same person, later the same day', () => {
+  let seen = 0;
+  for (let i = 0; i < 365; i++) {
+    const ls = historyLeads('clinic', addDays('2025-01-01', i));
+    for (const d of ls.filter(l => l.duplicate)) {
+      seen++;
+      assert.ok(ls.some(o => o !== d && !o.duplicate && o.name === d.name && o.createdAt <= d.createdAt));
+    }
+  }
+  assert.ok(seen > 0);
 });
