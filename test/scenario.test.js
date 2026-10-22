@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { makeRng } from '../lib/rng.js';
 import { PROBLEMS, parseScenario, resolveProblems } from '../lib/scenario.js';
 
-test('problem whitelist is the six keys in order', () => {
-  assert.deepEqual(PROBLEMS, ['missing_source', 'duplicates', 'meta_mismatch', 'bad_totals', 'edge_cases', 'ai_broken']);
+test('problem whitelist is the five keys in order (a broken AI is tried on the Generate button)', () => {
+  assert.deepEqual(PROBLEMS, ['missing_source', 'duplicates', 'meta_mismatch', 'bad_totals', 'edge_cases']);
 });
 
 test('missing or junk body falls back to random', () => {
@@ -19,7 +19,7 @@ test('clean mode is kept', () => {
 test('custom keeps only whitelisted, unique problems', () => {
   assert.deepEqual(
     parseScenario({ mode: 'custom', problems: ['duplicates', 'rm -rf', 'duplicates', 'ai_broken', 3, null], extra: 1 }),
-    { mode: 'custom', problems: ['duplicates', 'ai_broken'] });
+    { mode: 'custom', problems: ['duplicates'] });
   assert.equal(parseScenario({ mode: 'custom', problems: Array(10000).fill('duplicates') }).problems.length, 1);
 });
 

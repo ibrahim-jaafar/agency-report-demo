@@ -15,9 +15,9 @@ const AI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/com
 // Flash-Lite first: on the free tier it answers in seconds, while Flash often takes over a minute or is overloaded (measured 2026-10-20).
 // Flash is asked only when Lite's answer fails; each has its own free quota of 20 requests a day.
 const AI_MODELS = { first: 'gemini-flash-lite-latest', second: 'gemini-flash-latest' };
-const aiNode = (name, model) => ({ name, y: -300, type: 'n8n-nodes-base.httpRequest', v: 4.2,
+const aiNode = (name, model, from) => ({ name, y: 0, type: 'n8n-nodes-base.httpRequest', v: 4.2,
   params: { method: 'POST', url: AI_URL, authentication: 'genericCredentialType', genericAuthType: 'httpHeaderAuth',
-    sendBody: true, specifyBody: 'json', jsonBody: `={{ JSON.stringify({ model: '${model}', ...$('Checks').first().json.aiBody }) }}`,
+    sendBody: true, specifyBody: 'json', jsonBody: `={{ JSON.stringify({ model: '${model}', ...$('${from}').first().json.aiBody }) }}`,
     options: { timeout: 45000, response: { response: { fullResponse: true, neverError: true } } } },
   extra: { credentials: header('N8N_CRED_GEMINI', 'Gemini'), onError: 'continueRegularOutput' } });
 const CLIENTS = {
@@ -42,7 +42,8 @@ function workflow(name, steps) {
     nodes.push(node);
     const link = ([from, out]) => { connections[from] ??= { main: [] }; (connections[from].main[out] ??= []).push({ node: s.name, type: 'main', index: 0 }); };
     if (prev) link(Array.isArray(prev) ? prev : [prev, 0]);
-    if (s.alsoFrom) link(s.alsoFrom); // a second way in, e.g. the "nothing to retry" side of an IF
+    // more ways in, e.g. the "nothing to retry" side of an IF: [node, output] or a list of them
+    if (s.alsoFrom) (Array.isArray(s.alsoFrom[0]) ? s.alsoFrom : [s.alsoFrom]).forEach(link);
     prev = s.name; x += 220;
   }
   return { name, nodes, connections, settings: { executionOrder: 'v1' } };
@@ -124,7 +125,7 @@ const start = [
     "if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = null; } }",
     'const scenario = parseScenario(body);',
     'const limit = checkLimits($input.first().json.runs || [], new Date());',
-    "const steps = ['ghl', 'spend', 'meta', 'checks', 'ai'].map(key => ({ key, status: key === 'ghl' ? 'running' : 'pending' }));",
+    "const steps = ['ghl', 'spend', 'meta', 'checks'].map(key => ({ key, status: key === 'ghl' ? 'running' : 'pending' }));",
     'return [{ json: { scenario, limit, steps } }];']),
   { name: 'Allowed?', type: 'n8n-nodes-base.if', v: 2, params: { conditions: {
     options: { caseSensitive: true, leftValue: '', typeValidation: 'loose' },
@@ -207,14 +208,15 @@ const dealsCode = c => [
 ];
 
 const AI_SYSTEM = [
-  "You write the weekly results summary that a marketing agency's account manager reads before sending reports to two clients.",
+  "You write the results summary that a marketing agency's account manager reads before sending reports to two clients.",
   'Use plain, friendly English. Never type a digit. Wherever a number goes, write a placeholder from that client\'s "placeholders" list in curly braces, exactly as named, for example {costPerLead}.',
   'Code replaces each placeholder with the value listed next to it, so you can see what the reader will see. Never calculate new numbers.',
   'Use only the placeholders of the client you are writing about. The overview covers both clients and has no numbers or placeholders.',
-  'Placeholders ending in _change already say which way it went (for example "up 5%" or "down 33%"): write "leads were {leads_change} on the previous week", never "leads rose {leads_change}".',
-  'Outside the curly braces, never write field names such as costPerLead or paidLeads; say "cost per lead" or "paid leads". The data covers last week (Monday to Sunday).',
-  'Changes compare with the week before (the previous Monday to Sunday): call it "the previous week".',
-  'Keep each summary to two or three sentences: say what matters most this week and why, using only the few numbers that support it. Do not list every number; the report shows them all in a table.',
+  'Placeholders ending in _change already say which way it went (for example "up 5%" or "down 33%"): write "leads were {leads_change} compared with the same days last month", never "leads rose {leads_change}".',
+  'Outside the curly braces, never write field names such as costPerLead or paidLeads; say "cost per lead" or "paid leads".',
+  'The input\'s "period" says what the data covers ("covers", for example "this month so far") and what every change compares with ("vs"): use those words for them, never "this week" or "the previous week" unless that is what they say.',
+  'When period.finished is false the period is still under way: say "so far".',
+  'Keep each summary to two or three sentences: say what matters most in this period and why, using only the few numbers that support it. Do not list every number; the dashboard shows them all.',
   'Explain every warning in client-friendly words, and suggest at most three practical next steps per client.',
   'A warning\'s message contains numbers, so never copy it: explain it in your own words with {<code>_count} (for example {duplicates_count}), or write {<code>_message} on its own to show the check\'s wording.',
   placeholderGuide(),
@@ -234,12 +236,13 @@ const run = [
     "const { scenario } = $('Decide').first().json;",
     'const seed = parseInt(runId.replace(/-/g, \'\').slice(0, 8), 16);',
     'const rng = makeRng(seed);',
-    '// last full week (Monday to Monday, UTC): a weekly report covers a finished week, and no lead is dated in the future',
+    "// the last 7 days up to now (UTC): today so far and the 6 days before. Meta takes conversions up to 7 days old,",
+    '// and no lead is dated in the future',
     'const now = new Date();',
-    'const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - ((now.getUTCDay() + 6) % 7) - 7));',
+    'const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 6));',
     'const problems = resolveProblems(scenario, rng);',
-    "const leads = { clinic: generateLeads('clinic', problems, rng, weekStart), store: generateLeads('store', problems, rng, weekStart) };",
-    'return [{ json: { runId, seed, problems, weekStart: weekStart.toISOString(), leads } }];'], -300),
+    "const leads = { clinic: generateLeads('clinic', problems, rng, weekStart, +now), store: generateLeads('store', problems, rng, weekStart, +now) };",
+    'return [{ json: { runId, seed, problems, weekStart: weekStart.toISOString(), ranAt: now.toISOString(), leads } }];'], -300),
   codeNode('Clinic: contacts', contactsCode('clinic'), -300),
   ...ghlSave('clinic', 'save contacts', 'Clinic: contacts', -300),
   afterSave(codeNode('Store: contacts', contactsCode('store'), -300), 'clinic', 'save contacts'),
@@ -272,7 +275,7 @@ const run = [
     '}',
     "steps = setStep(steps, 'ghl', ghlStatus, ghlNotes.join('; ') || undefined);",
     "// problems: the mistakes the visitor picked (empty for a real client). select: which contacts belong to this report.",
-    "return [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, steps, spend, select: { tag: `run:${plan.runId}` }, saved } }];"], -300), 'store', 'save deals'),
+    "return [{ json: { runId: plan.runId, problems: plan.problems, weekStart: plan.weekStart, ranAt: plan.ranAt, steps, spend, select: { tag: `run:${plan.runId}` }, saved } }];"], -300), 'store', 'save deals'),
   // GoHighLevel's search finds new contacts only some time after they're saved (seen: 0 of 6 found 20 s later).
   // So wait until search finds every contact this run saved, then hand over. Only the demo needs this: a real report runs days later.
   ...catchUp,
@@ -336,7 +339,7 @@ const report = [
     "if (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));",
     "steps = setStep(steps, 'spend', 'done');",
     "steps = setStep(steps, 'meta', 'running');",
-    'return [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, clients: out, steps } }];'], -300), 'store', 'read'),
+    'return [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, ranAt: job.ranAt, clients: out, steps } }];'], -300), 'store', 'read'),
   sql('Save progress 1', [
     '-- show the visitor the CRM step is done',
     'with u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)',
@@ -375,47 +378,18 @@ const report = [
     '  const weekStart = new Date(crm.weekStart);',
     '  const kpis = computeKpis(c.client, c.leads, c.spend, weekStart);',
     '  const warnings = runChecks({ client: c.client, leads: c.leads, spend: c.spend, meta, weekStart });',
-    '  // compared with the week before, from the same daily figures as the other dashboard views',
-    '  const previousKpis = previousWeekKpis(c.client, weekStart);',
-    '  return { client: c.client, name: c.name, kpis, previousKpis, warnings, skipped: c.skipped, campaigns: campaignRows(c.spend, c.leads, weekStart), days: runDays(c.client, c.leads, c.spend, weekStart), leadList: leadList(c.leads, weekStart) };',
+    '  return { client: c.client, name: c.name, kpis, warnings, skipped: c.skipped, campaigns: campaignRows(c.spend, c.leads, weekStart),',
+    '    days: runDays(c.client, c.leads, c.spend, weekStart, meta), leadList: leadList(c.leads, weekStart) };',
     '});',
     "steps = setStep(steps, 'meta', metaFailed.length ? 'failed' : 'done', metaFailed.join('; ') || undefined);",
     "steps = setStep(steps, 'checks', 'done');",
-    "steps = setStep(steps, 'ai', 'running');",
-    'const aiInput = buildAiInput(clients);',
-    `const aiBody = { messages: [{ role: 'system', content: ${JSON.stringify(AI_SYSTEM)} }, { role: 'user', content: JSON.stringify(aiInput) }],`,
-    "  response_format: { type: 'json_schema', json_schema: { name: 'weekly_report', strict: true, schema: AI_SCHEMA } } };",
-    'return [{ json: { ...crm, clients, aiInput, aiBody, steps } }];'], -300),
-  sql('Save progress 2', [
-    '-- show the visitor the checks are done',
-    'with u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)',
-    'select 1 as saved'],
-    '={{ [$json.runId, JSON.stringify($json.steps)] }}', -300),
-  aiNode('AI: write summary', AI_MODELS.first),
-  codeNode('Check AI answer', [
+    'return [{ json: { ...crm, clients, steps } }];'], -300),
+  codeNode('Build report', [
     '/*@lib*/',
     "const ck = $('Checks').first().json;",
-    "return [{ json: { ok: !!pickAiAnswer($input.all().map(i => i.json), ck.aiInput, ck.problems.includes('ai_broken')).value } }];"], -300),
-  { name: 'AI answer ok?', y: -300, type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ $json.ok }}', sid('ai answer ok')) },
-  { branch: ['AI answer ok?', 1], x: 4840 },
-  { ...aiNode('AI: second try', AI_MODELS.second), y: -100 },
-  { ...codeNode('Build report', [
-    '/*@lib*/',
-    ...STEP_HELPERS,
-    "const ck = $('Checks').first().json;",
-    "// the first model's answer, then the second model's if it was asked",
-    "const replies = ['AI: write summary', 'AI: second try'].filter(n => $(n).isExecuted).flatMap(n => $(n).all().map(i => i.json));",
-    "const pick = pickAiAnswer(replies, ck.aiInput, ck.problems.includes('ai_broken'));",
-    'let steps = ck.steps, ai;',
-    "if (pick.value) { ai = { source: 'ai', value: pick.value }; steps = setStep(steps, 'ai', 'done'); }",
-    'else {',
-    "  ai = { source: 'template', value: templateSummary(ck.aiInput) };",
-    "  steps = pick.gotAnswer ? setStep(steps, 'ai', 'warning', `AI answer rejected (${pick.errors[0]}); template summary used`)",
-    "    : setStep(steps, 'ai', 'failed', `${pick.errors[0] || 'no AI answer'}; template summary used`);",
-    '}',
     'const metaSkipped = ck.clients.reduce((a, c) => a + c.skipped, 0);',
-    'const report = buildReport({ runId: ck.runId, weekStart: ck.weekStart, clients: ck.clients, steps, ai, problems: ck.problems, metaSkipped });',
-    "return [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps } }];"], -300), alsoFrom: ['AI answer ok?', 0] },
+    'const report = buildReport({ runId: ck.runId, weekStart: ck.weekStart, asOf: ck.ranAt, clients: ck.clients, steps: ck.steps, problems: ck.problems, metaSkipped });',
+    "return [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps: ck.steps } }];"], -300),
   sql('Save result', 'update demo_runs set status = $2, report = $3::jsonb, steps = $4::jsonb where id = $1::uuid returning id',
     '={{ [$json.runId, $json.status, JSON.stringify($json.report), JSON.stringify($json.steps)] }}', -300),
   ...(SLACK ? [
@@ -450,6 +424,150 @@ const cleanup = (c, y) => {
   ];
 };
 
+// ---------- the AI summary, on request, for whatever period the dashboard shows ----------
+// The page sends only which period (no numbers, no text): the figures are worked out here from the latest report
+// with the same code the dashboard uses, so nobody can feed the AI their own words. One answer covers both clients.
+// Answers are kept (demo_summaries): a finished period is written once per run, one still under way once an hour.
+const SUMMARY_AI_PER_DAY = 40; // Gemini's free tier is 20 a day per model; past this the template writes
+const summary = [
+  { name: 'Summary webhook', type: 'n8n-nodes-base.webhook', v: 2, params: { httpMethod: 'POST', path: 'demo/summary', responseMode: 'responseNode', options: { allowedOrigins: ORIGIN } }, extra: { webhookId: sid('demo/summary') } },
+  sql('Make cache table', 'create table if not exists demo_summaries (key text primary key, body jsonb not null, created_at timestamptz not null default now())', null, 0, { alwaysOutputData: true }),
+  sql('Latest report', "select (select json_build_object('runId', id, 'report', report) from demo_runs where status in ('done','partial') order by created_at desc limit 1) as latest", null, 0, { alwaysOutputData: true }),
+  codeNode('Figures', [
+    '/*@lib*/',
+    "let body = $('Summary webhook').first().json.body;",
+    "if (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = null; } }",
+    "if (!body || typeof body !== 'object') body = {};",
+    "const period = ['day', 'week', 'month', 'year'].includes(body.period) ? body.period : 'week';",
+    'const back = Number.isInteger(body.back) && body.back >= 0 && body.back < 1000 ? body.back : 0;',
+    "const dayVs = body.dayVs === 'prev' ? 'prev' : 'week', broken = body.broken === true;",
+    "const latest = $('Latest report').first().json.latest;",
+    "if (!latest?.report) return [{ json: { none: true, key: '' } }];",
+    'const report = latest.report, now = new Date();',
+    'const figs = report.clients.map(c => ({ c, f: periodFigures(c.client, { ...c, asOf: report.asOf }, period, now, back, dayVs) }));',
+    'const f = figs[0].f, named = periodWords(period, back, dayVs, f.from);',
+    "const aiInput = buildAiInput(figs.map(({ c, f }) => ({ client: c.client, name: c.name, kpis: f.kpis, previousKpis: f.before, warnings: f.health.warnings })), named);",
+    `const aiBody = { messages: [{ role: 'system', content: ${JSON.stringify(AI_SYSTEM)} }, { role: 'user', content: JSON.stringify(aiInput) }],`,
+    "  response_format: { type: 'json_schema', json_schema: { name: 'summary', strict: true, schema: AI_SCHEMA } } };",
+    "// a period under way changes as the day goes on: kept for the hour (or until the run's data changes)",
+    "const at = !f.current ? '' : f.cut ? f.asOf : f.asOf.slice(0, 13);",
+    "const key = [latest.runId, period, f.from, f.to, dayVs, at].join('|');",
+    'const out = { period: named, from: f.from, to: f.to, current: f.current, asOf: f.asOf };',
+    'return [{ json: { key, broken, aiInput, aiBody, out } }];'], 0),
+  sql('Cached?', ["select (select body from demo_summaries where key = $1) as body,",
+    `  (select count(*) from demo_summaries where created_at > now() - interval '1 day')::int as today`], '={{ [$json.key] }}', 0, { alwaysOutputData: true }),
+  codeNode('Decide AI', [
+    "const fx = $('Figures').first().json, row = $input.first().json;",
+    `const overLimit = (row.today ?? 0) >= ${SUMMARY_AI_PER_DAY};`,
+    "// the broken-answer test skips any kept answer (it would hide the test) and never needs the AI: its reply is replaced anyway",
+    'const cached = fx.broken ? null : row.body ?? null;',
+    'return [{ json: { cached, overLimit, needAi: !fx.none && !cached && !fx.broken && !overLimit } }];'], 0),
+  { name: 'Ask Gemini?', type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ $json.needAi }}', sid('ask gemini')) },
+  aiNode('AI: write summary', AI_MODELS.first, 'Figures'),
+  codeNode('Check AI answer', ['/*@lib*/', "const fx = $('Figures').first().json;",
+    'return [{ json: { ok: !!pickAiAnswer($input.all().map(i => i.json), fx.aiInput).value } }];'], 0),
+  { name: 'AI answer ok?', type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ $json.ok }}', sid('summary ai ok')) },
+  { branch: ['AI answer ok?', 1], x: 2200 },
+  { ...aiNode('AI: second try', AI_MODELS.second, 'Figures'), y: 200 },
+  { ...codeNode('Build answer', [
+    '/*@lib*/',
+    "const fx = $('Figures').first().json, d = $('Decide AI').first().json;",
+    "if (fx.none) return [{ json: { code: 404, save: false, body: { error: 'There is no report yet: run the report first.' } } }];",
+    'if (d.cached) return [{ json: { code: 200, save: false, body: { ...d.cached, cached: true } } }];',
+    '// the demo\'s "broken AI answer": the reply is a refusal, which the checks turn down, so the template writes',
+    "const replies = fx.broken ? [{ statusCode: 200, body: { choices: [{ message: { content: \"Sorry, I can't help with that.\" } }] } }]",
+    "  : ['AI: write summary', 'AI: second try'].filter(n => $(n).isExecuted).flatMap(n => $(n).all().map(i => i.json));",
+    'const pick = pickAiAnswer(replies, fx.aiInput);',
+    "const why = pick.value ? null : d.overLimit ? 'the demo’s AI allowance for today is used up' : fx.broken ? 'the AI’s answer was a refusal, so the checks turned it down'",
+    "  : pick.gotAnswer ? `the AI’s answer failed the checks (${pick.errors[0]})` : `the AI didn’t answer (${pick.errors[0] ?? 'no reply'}); try again in a minute`;",
+    "const body = { ...fx.out, source: pick.value ? 'ai' : 'template', why, value: pick.value ?? templateSummary(fx.aiInput) };",
+    "return [{ json: { code: 200, save: body.source === 'ai', body } }];"], 0), alsoFrom: [['AI answer ok?', 0], ['Ask Gemini?', 1]] },
+  { name: 'Keep it?', type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ $json.save }}', sid('keep summary')) },
+  sql('Keep summary', 'insert into demo_summaries (key, body) values ($1, $2::jsonb) on conflict (key) do nothing returning key',
+    "={{ [$('Figures').first().json.key, JSON.stringify($('Build answer').first().json.body)] }}", 0, { alwaysOutputData: true }),
+  { name: 'Respond summary', type: 'n8n-nodes-base.respondToWebhook', v: 1.1, alsoFrom: ['Keep it?', 1],
+    params: { respondWith: 'json', responseBody: "={{ JSON.stringify($('Build answer').first().json.body) }}", options: { responseCode: "={{ $('Build answer').first().json.code }}" } } },
+];
+
+// ---------- a test lead: one made-up customer arriving now, through the real systems ----------
+// After a run nothing arrives on its own; this pushes one more customer through GoHighLevel (and Meta when they book
+// or order) and adds them to the latest run, which must be from today. A few seconds apart, at most TEST_LEADS_MAX a run.
+const TEST_LEADS_MAX = 30, TEST_LEAD_GAP_SEC = 5;
+const testContactReq = c => `{ method: 'POST', url: '${GHL}/contacts/', body: { locationId: '${CLIENTS[c].location}', firstName: t.lead.firstName, lastName: t.lead.lastName, email: t.lead.email, phone: t.lead.phone,
+    tags: ['demo', 'test-lead', \`run:\${t.runId}\`, \`created:\${Date.parse(t.lead.createdAt)}\`], ...(t.lead.source ? { source: t.lead.source } : {}) } }`;
+const testDeal = c => [
+  `// ${CLIENTS[c].name}: a deal when the test lead booked, ordered, cancelled or was refunded`,
+  "const t = $('Plan test lead').first().json, r = $input.first().json;",
+  "const contactId = r.statusCode < 300 ? r.body?.contact?.id : null;",
+  `const G = '${GHL}';`,
+  "if (contactId && t.lead.outcome !== 'open') return [{ json: { contactId, req: { method: 'POST', url: `${G}/opportunities/`, body: {",
+  `  locationId: '${CLIENTS[c].location}', pipelineId: '${CLIENTS[c].pipeline}', pipelineStageId: '${CLIENTS[c].stage}', contactId,`,
+  `  name: \`\${t.lead.firstName} \${t.lead.lastName} – ${c === 'clinic' ? 'consultation' : 'order'}\`, status: t.lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: t.lead.value } } } }];`,
+  "// ponytail: one harmless lookup when there's no deal to save (n8n stops a branch with no items)",
+  `return [{ json: { contactId, req: { method: 'POST', url: \`\${G}/contacts/search\`, body: { locationId: '${CLIENTS[c].location}', pageLimit: 1 } } } }];`,
+];
+const testLeadSteps = [
+  { name: 'Lead webhook', type: 'n8n-nodes-base.webhook', v: 2, params: { httpMethod: 'POST', path: 'demo/lead', responseMode: 'responseNode', options: { allowedOrigins: ORIGIN } }, extra: { webhookId: sid('demo/lead') } },
+  sql('Latest run', "select (select json_build_object('id', id, 'status', status, 'report', report) from demo_runs order by created_at desc limit 1) as latest", null, 0, { alwaysOutputData: true }),
+  codeNode('Plan test lead', [
+    '/*@lib*/',
+    "let ask = $('Lead webhook').first().json.body;",
+    "if (typeof ask === 'string') { try { ask = JSON.parse(ask); } catch { ask = null; } }",
+    "const client = ask?.client === 'store' ? 'store' : 'clinic';",
+    "const latest = $input.first().json.latest, rep = latest?.report, now = Date.now();",
+    "const refuse = (code, error) => [{ json: { refuse: { code, error } } }];",
+    "if (latest?.status === 'running') return refuse(409, 'A run is going: send test leads once it has finished.');",
+    "if (!rep?.asOf || rep.asOf.slice(0, 10) !== new Date(now).toISOString().slice(0, 10)) return refuse(409, 'Test leads join today’s run: run the report first.');",
+    `if ((rep.testLeads || 0) >= ${TEST_LEADS_MAX}) return refuse(429, 'This run has had its ${TEST_LEADS_MAX} test leads: run the report again for more.');`,
+    `if (now - Date.parse(rep.asOf) < ${TEST_LEAD_GAP_SEC * 1000}) return refuse(429, 'One test lead every ${TEST_LEAD_GAP_SEC} seconds, please.');`,
+    '// a mixed seed: seeds a few seconds apart would give nearly the same person',
+    'const lead = testLead(client, makeRng(seedOf(`${client}:${now}`)), now);',
+    'return [{ json: { client, runId: latest.id, lead } }];'], 0),
+  { name: 'Allowed?', type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ !$json.refuse }}', sid('test lead allowed')) },
+  { name: 'Clinic?', type: 'n8n-nodes-base.if', v: 2, params: ifTrue("={{ $json.client === 'clinic' }}", sid('test lead clinic')) },
+  codeNode('Clinic: test contact', ["const t = $input.first().json;", `return [{ json: { req: ${testContactReq('clinic')} } }];`], 0),
+  ghlHttp('clinic', 'test contact', 0),
+  codeNode('Clinic: test deal', testDeal('clinic'), 0),
+  ghlHttp('clinic', 'test deal', 0),
+  { name: 'Clinic saved', type: 'n8n-nodes-base.noOp', v: 1, params: {} },
+  { branch: ['Clinic?', 1], x: 1100 },
+  { ...codeNode('Store: test contact', ["const t = $input.first().json;", `return [{ json: { req: ${testContactReq('store')} } }];`], 200) },
+  ghlHttp('store', 'test contact', 200),
+  codeNode('Store: test deal', testDeal('store'), 200),
+  ghlHttp('store', 'test deal', 200),
+  { name: 'After GoHighLevel', y: 0, alsoFrom: ['Clinic saved', 0], ...codeNode('After GoHighLevel', [
+    '/*@lib*/',
+    "const t = $('Plan test lead').first().json, label = t.client === 'clinic' ? 'Clinic' : 'Store';",
+    "const deal = $(`${label}: test deal`).first().json, dealReply = $input.first().json;",
+    "const saved = !!deal.contactId, dealOk = t.lead.outcome === 'open' || dealReply.statusCode < 300;",
+    "if (!saved) return [{ json: { ...t, saved, dealOk, meta: null } }];",
+    "// a booking or order goes to Meta, like the run's",
+    "const crypto = require('crypto');",
+    "const sha256 = s => crypto.createHash('sha256').update(s).digest('hex');",
+    "const ev = buildMetaEvents(t.client, [t.lead], [], Math.floor(Date.now() / 1000), sha256).events;",
+    `const meta = ev.length ? { method: 'POST', url: '${META_URL}', body: { data: ev, test_event_code: '${env.META_TEST_EVENT_CODE}' } } : null;`,
+    'return [{ json: { ...t, saved, dealOk, meta, req: meta } }];'], 0) },
+  { name: 'To Meta?', type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ !!$json.meta }}', sid('test lead meta')) },
+  { ...http('Meta: send test conversion', header('N8N_CRED_META', 'Meta CAPI')), y: 0 },
+  { ...codeNode('Add to the run', [
+    '/*@lib*/',
+    "const t = $('After GoHighLevel').first().json, latest = $('Latest run').first().json.latest;",
+    "const metaReply = $('Meta: send test conversion').isExecuted ? $('Meta: send test conversion').first().json : null;",
+    "const metaOk = !!metaReply && metaReply.statusCode === 200 && Number(metaReply.body?.events_received) === 1;",
+    "if (!t.saved) return [{ json: { code: 502, save: false, body: { error: 'GoHighLevel didn’t take the test lead. Please try again in a minute.' } } }];",
+    'const report = addTestLead(latest.report, t.client, t.lead, metaOk);',
+    "const name = `${t.lead.firstName} ${[...t.lead.lastName][0] ?? ''}.`;",
+    "return [{ json: { code: 200, save: true, runId: t.runId, report, body: { name, client: t.client, source: t.lead.source, outcome: t.lead.outcome, value: t.lead.value,",
+    "  createdAt: t.lead.createdAt, deal: t.lead.outcome === 'open' ? null : t.dealOk, meta: t.meta ? metaOk : null } } }];"], 0), alsoFrom: ['To Meta?', 1] },
+  { name: 'Save it?', type: 'n8n-nodes-base.if', v: 2, params: ifTrue('={{ $json.save }}', sid('test lead save')) },
+  sql('Save the run', 'update demo_runs set report = $2::jsonb where id = $1::uuid returning id', "={{ [$json.runId, JSON.stringify($json.report)] }}", 0, { alwaysOutputData: true }),
+  { name: 'Respond test lead', type: 'n8n-nodes-base.respondToWebhook', v: 1.1, alsoFrom: ['Save it?', 1],
+    params: { respondWith: 'json', responseBody: "={{ JSON.stringify($('Add to the run').first().json.body) }}", options: { responseCode: "={{ $('Add to the run').first().json.code }}" } } },
+  { branch: ['Allowed?', 1], x: 660 },
+  { name: 'Respond refused', y: 400, type: 'n8n-nodes-base.respondToWebhook', v: 1.1,
+    params: { respondWith: 'json', responseBody: "={{ JSON.stringify({ error: $json.refuse.error }) }}", options: { responseCode: '={{ $json.refuse.code }}' } } },
+];
+
 const demoRun = workflow('demo-run', [...start, ...refuse, ...run, ...catchUpLoop, ...cleanup('clinic', 600), ...cleanup('store', 800)]);
 const weeklyReport = workflow('weekly-report', report);
 
@@ -477,5 +595,8 @@ const errorHandler = workflow('error-handler', [
     slackSend(200)] : []),
 ]);
 
-for (const wf of [demoRun, weeklyReport, demoStatus, errorHandler]) writeFileSync(new URL(`../workflows/src/${wf.name}.json`, import.meta.url), JSON.stringify(wf, null, 2) + '\n');
+const demoSummary = workflow('demo-summary', summary);
+const demoLead = workflow('demo-lead', testLeadSteps);
+
+for (const wf of [demoRun, weeklyReport, demoStatus, demoSummary, demoLead, errorHandler]) writeFileSync(new URL(`../workflows/src/${wf.name}.json`, import.meta.url), JSON.stringify(wf, null, 2) + '\n');
 console.log('templates written');

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { buildAll } from './build-workflows.mjs';
 import { api } from './n8n.mjs';
 
-const ORDER = ['error-handler', 'demo-status', 'weekly-report', 'demo-run'];
+const ORDER = ['error-handler', 'demo-status', 'demo-summary', 'demo-lead', 'weekly-report', 'demo-run'];
 buildAll();
 const existing = (await api('GET', '/workflows?limit=100')).data;
 const ids = {};

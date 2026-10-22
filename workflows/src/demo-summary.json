@@ -1,0 +1,534 @@
+{
+  "name": "demo-summary",
+  "nodes": [
+    {
+      "id": "ad20d41a-56fd-9cab-8f34-6af6eb37b984",
+      "name": "Summary webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo/summary",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://ibrahim-jaafar.github.io"
+        }
+      },
+      "webhookId": "c01b616a-ab1d-62fd-fd46-fe2c8085a7e5"
+    },
+    {
+      "id": "c8f4312f-2404-2fa9-5672-54d73f3fefe0",
+      "name": "Make cache table",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "create table if not exists demo_summaries (key text primary key, body jsonb not null, created_at timestamptz not null default now())",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "16233f42-dd9a-9828-46db-eb51d702292a",
+      "name": "Latest report",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select (select json_build_object('runId', id, 'report', report) from demo_runs where status in ('done','partial') order by created_at desc limit 1) as latest",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "a766da6b-9441-be10-cd52-bf5d6210fd43",
+      "name": "Figures",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nlet body = $('Summary webhook').first().json.body;\nif (typeof body === 'string') { try { body = JSON.parse(body); } catch { body = null; } }\nif (!body || typeof body !== 'object') body = {};\nconst period = ['day', 'week', 'month', 'year'].includes(body.period) ? body.period : 'week';\nconst back = Number.isInteger(body.back) && body.back >= 0 && body.back < 1000 ? body.back : 0;\nconst dayVs = body.dayVs === 'prev' ? 'prev' : 'week', broken = body.broken === true;\nconst latest = $('Latest report').first().json.latest;\nif (!latest?.report) return [{ json: { none: true, key: '' } }];\nconst report = latest.report, now = new Date();\nconst figs = report.clients.map(c => ({ c, f: periodFigures(c.client, { ...c, asOf: report.asOf }, period, now, back, dayVs) }));\nconst f = figs[0].f, named = periodWords(period, back, dayVs, f.from);\nconst aiInput = buildAiInput(figs.map(({ c, f }) => ({ client: c.client, name: c.name, kpis: f.kpis, previousKpis: f.before, warnings: f.health.warnings })), named);\nconst aiBody = { messages: [{ role: 'system', content: \"You write the results summary that a marketing agency's account manager reads before sending reports to two clients. Use plain, friendly English. Never type a digit. Wherever a number goes, write a placeholder from that client's \\\"placeholders\\\" list in curly braces, exactly as named, for example {costPerLead}. Code replaces each placeholder with the value listed next to it, so you can see what the reader will see. Never calculate new numbers. Use only the placeholders of the client you are writing about. The overview covers both clients and has no numbers or placeholders. Placeholders ending in _change already say which way it went (for example \\\"up 5%\\\" or \\\"down 33%\\\"): write \\\"leads were {leads_change} compared with the same days last month\\\", never \\\"leads rose {leads_change}\\\". Outside the curly braces, never write field names such as costPerLead or paidLeads; say \\\"cost per lead\\\" or \\\"paid leads\\\". The input's \\\"period\\\" says what the data covers (\\\"covers\\\", for example \\\"this month so far\\\") and what every change compares with (\\\"vs\\\"): use those words for them, never \\\"this week\\\" or \\\"the previous week\\\" unless that is what they say. When period.finished is false the period is still under way: say \\\"so far\\\". Keep each summary to two or three sentences: say what matters most in this period and why, using only the few numbers that support it. Do not list every number; the dashboard shows them all. Explain every warning in client-friendly words, and suggest at most three practical next steps per client. A warning's message contains numbers, so never copy it: explain it in your own words with {<code>_count} (for example {duplicates_count}), or write {<code>_message} on its own to show the check's wording. Every placeholder needs its own label within a few words of it, in the same sentence, like these examples. A placeholder without its label nearby, or right after another number's label, makes the answer invalid.\\n{spend}: next to \\\"spend\\\" or \\\"spent\\\" or \\\"budget\\\", e.g. \\\"ad spend was {spend}\\\"\\n{leads}: next to \\\"lead\\\" or \\\"enquiry\\\" or \\\"enquiries\\\", e.g. \\\"{leads} leads came in\\\"\\n{paidLeads}: next to \\\"paid lead\\\" or \\\"from ads\\\" or \\\"from paid\\\", e.g. \\\"{paidLeads} paid leads\\\"\\n{costPerLead}: next to \\\"per lead\\\" or \\\"per paid lead\\\" or \\\"each lead\\\" or \\\"each paid lead\\\", e.g. \\\"cost per paid lead was {costPerLead}\\\"\\n{cancelled}: next to \\\"cancel\\\" or \\\"refund\\\", e.g. \\\"{cancelled} cancelled bookings\\\"\\n{bookings}: next to \\\"booking\\\" or \\\"booked\\\" or \\\"consultation\\\" or \\\"appointment\\\", e.g. \\\"{bookings} booked consultations\\\"\\n{costPerBooking}: next to \\\"per booking\\\" or \\\"each booking\\\" or \\\"per consultation\\\" or \\\"per appointment\\\", e.g. \\\"cost per booking was {costPerBooking}\\\"\\n{bookingRate}: next to \\\"rate\\\" or \\\"of leads\\\" or \\\"of all leads\\\", e.g. \\\"a booking rate of {bookingRate}\\\"\\n{orders}: next to \\\"order\\\" or \\\"purchase\\\", e.g. \\\"{orders} orders\\\"\\n{revenue}: next to \\\"revenue\\\" or \\\"sales\\\" or \\\"income\\\", e.g. \\\"revenue was {revenue}\\\"\\n{roas}: next to \\\"return on ad spend\\\" or \\\"roas\\\", e.g. \\\"return on ad spend was {roas}\\\"\\n{costPerOrder}: next to \\\"per order\\\" or \\\"each order\\\", e.g. \\\"cost per order was {costPerOrder}\\\"\\n{avgOrderValue}: next to \\\"average order\\\" or \\\"order value\\\", e.g. \\\"the average order was {avgOrderValue}\\\"\\nA {name_change} placeholder needs the same label as {name}, e.g. \\\"leads were {leads_change} compared with the same days last month\\\" or \\\"cost per lead was {costPerLead_change} compared with last week\\\".\\n{meta_mismatch_count}: next to \\\"meta\\\" or \\\"facebook\\\", e.g. \\\"Meta is missing {meta_mismatch_count} bookings\\\"\\n{missing_source_count}: next to \\\"source\\\" or \\\"which ad\\\" or \\\"where they came\\\" or \\\"where it came\\\", e.g. \\\"{missing_source_count} leads have no recorded source\\\"\\n{duplicates_count}: next to \\\"twice\\\" or \\\"duplicate\\\" or \\\"same person\\\" or \\\"more than once\\\", e.g. \\\"{duplicates_count} leads appear twice\\\"\\n{bad_totals_count}: next to \\\"total\\\", e.g. \\\"{bad_totals_count} total that does not add up\\\"\\n{outlier_count}: next to \\\"order\\\" or \\\"large\\\" or \\\"unusual\\\", e.g. \\\"{outlier_count} unusually large order\\\"\\n{meta_rejected_count}: next to \\\"meta\\\" or \\\"facebook\\\" or \\\"reject\\\" or \\\"refuse\\\" or \\\"refused\\\", e.g. \\\"Meta rejected {meta_rejected_count} events\\\"\\nA {code_message} placeholder is the check's own sentence: put it on its own, e.g. \\\"{duplicates_message}\\\". Stay inside the length limits, counted after the placeholders are filled in: overview one sentence under 200 characters, headline under 90, summary under 600, each warning under 300, each next step under 200. Return JSON that matches the schema exactly. 'clinic' is the clinic, 'store' is the store.\" }, { role: 'user', content: JSON.stringify(aiInput) }],\n  response_format: { type: 'json_schema', json_schema: { name: 'summary', strict: true, schema: AI_SCHEMA } } };\n// a period under way changes as the day goes on: kept for the hour (or until the run's data changes)\nconst at = !f.current ? '' : f.cut ? f.asOf : f.asOf.slice(0, 13);\nconst key = [latest.runId, period, f.from, f.to, dayVs, at].join('|');\nconst out = { period: named, from: f.from, to: f.to, current: f.current, asOf: f.asOf };\nreturn [{ json: { key, broken, aiInput, aiBody, out } }];"
+      }
+    },
+    {
+      "id": "cf9b2ef2-98be-5c33-97e8-f92db107b3d5",
+      "name": "Cached?",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select (select body from demo_summaries where key = $1) as body,\n  (select count(*) from demo_summaries where created_at > now() - interval '1 day')::int as today",
+        "options": {
+          "queryReplacement": "={{ [$json.key] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "92002717-cbd8-8b1c-e664-6b4a2be58b93",
+      "name": "Decide AI",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const fx = $('Figures').first().json, row = $input.first().json;\nconst overLimit = (row.today ?? 0) >= 40;\n// the broken-answer test skips any kept answer (it would hide the test) and never needs the AI: its reply is replaced anyway\nconst cached = fx.broken ? null : row.body ?? null;\nreturn [{ json: { cached, overLimit, needAi: !fx.none && !cached && !fx.broken && !overLimit } }];"
+      }
+    },
+    {
+      "id": "05cc771d-7ab7-074d-3ed1-38e3d4437750",
+      "name": "Ask Gemini?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "ffd1c669-e2bb-8774-671b-b6f4fe8660b9",
+              "leftValue": "={{ $json.needAi }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "e9a77a5c-861e-766b-c6ea-7ac34b32f288",
+      "name": "AI: write summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gemini-flash-lite-latest', ...$('Figures').first().json.aiBody }) }}",
+        "options": {
+          "timeout": 45000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OZF5vuPL8kSAiXEF",
+          "name": "Gemini"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "1af02747-6992-ab51-486c-b8eefdc22b45",
+      "name": "Check AI answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst fx = $('Figures').first().json;\nreturn [{ json: { ok: !!pickAiAnswer($input.all().map(i => i.json), fx.aiInput).value } }];"
+      }
+    },
+    {
+      "id": "0fa95421-3775-8472-9d0e-50f0b13dfc89",
+      "name": "AI answer ok?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "da97557f-a75d-5e06-48be-dfbf058c496f",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "af6e9033-0563-ef0a-9190-57852e98e1b9",
+      "name": "AI: second try",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gemini-flash-latest', ...$('Figures').first().json.aiBody }) }}",
+        "options": {
+          "timeout": 45000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "OZF5vuPL8kSAiXEF",
+          "name": "Gemini"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a084c98b-0508-6976-a12b-9148d52b72a6",
+      "name": "Build answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        0
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst fx = $('Figures').first().json, d = $('Decide AI').first().json;\nif (fx.none) return [{ json: { code: 404, save: false, body: { error: 'There is no report yet: run the report first.' } } }];\nif (d.cached) return [{ json: { code: 200, save: false, body: { ...d.cached, cached: true } } }];\n// the demo's \"broken AI answer\": the reply is a refusal, which the checks turn down, so the template writes\nconst replies = fx.broken ? [{ statusCode: 200, body: { choices: [{ message: { content: \"Sorry, I can't help with that.\" } }] } }]\n  : ['AI: write summary', 'AI: second try'].filter(n => $(n).isExecuted).flatMap(n => $(n).all().map(i => i.json));\nconst pick = pickAiAnswer(replies, fx.aiInput);\nconst why = pick.value ? null : d.overLimit ? 'the demo’s AI allowance for today is used up' : fx.broken ? 'the AI’s answer was a refusal, so the checks turned it down'\n  : pick.gotAnswer ? `the AI’s answer failed the checks (${pick.errors[0]})` : `the AI didn’t answer (${pick.errors[0] ?? 'no reply'}); try again in a minute`;\nconst body = { ...fx.out, source: pick.value ? 'ai' : 'template', why, value: pick.value ?? templateSummary(fx.aiInput) };\nreturn [{ json: { code: 200, save: body.source === 'ai', body } }];"
+      }
+    },
+    {
+      "id": "d50fa8a2-ee9d-de31-5fd9-e1d0644abdfe",
+      "name": "Keep it?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c40a56e6-d74c-7e98-216e-ef228517ffcc",
+              "leftValue": "={{ $json.save }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0abef298-778a-4d07-ef34-fee201d98f50",
+      "name": "Keep summary",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2860,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into demo_summaries (key, body) values ($1, $2::jsonb) on conflict (key) do nothing returning key",
+        "options": {
+          "queryReplacement": "={{ [$('Figures').first().json.key, JSON.stringify($('Build answer').first().json.body)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "afe40461-5b63-e91a-b735-a562752c67b7",
+      "name": "Respond summary",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3080,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Build answer').first().json.body) }}",
+        "options": {
+          "responseCode": "={{ $('Build answer').first().json.code }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Summary webhook": {
+      "main": [
+        [
+          {
+            "node": "Make cache table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make cache table": {
+      "main": [
+        [
+          {
+            "node": "Latest report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest report": {
+      "main": [
+        [
+          {
+            "node": "Figures",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Figures": {
+      "main": [
+        [
+          {
+            "node": "Cached?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cached?": {
+      "main": [
+        [
+          {
+            "node": "Decide AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide AI": {
+      "main": [
+        [
+          {
+            "node": "Ask Gemini?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask Gemini?": {
+      "main": [
+        [
+          {
+            "node": "AI: write summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: write summary": {
+      "main": [
+        [
+          {
+            "node": "Check AI answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check AI answer": {
+      "main": [
+        [
+          {
+            "node": "AI answer ok?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI answer ok?": {
+      "main": [
+        [
+          {
+            "node": "Build answer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI: second try",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI: second try": {
+      "main": [
+        [
+          {
+            "node": "Build answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build answer": {
+      "main": [
+        [
+          {
+            "node": "Keep it?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep it?": {
+      "main": [
+        [
+          {
+            "node": "Keep summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep summary": {
+      "main": [
+        [
+          {
+            "node": "Respond summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

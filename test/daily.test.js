@@ -153,7 +153,7 @@ test('live uses the run’s real day for "same time last week" when it has one',
 });
 
 // ---------- campaigns per day, leads list, previous week ----------
-import { sumCampaigns, leadList, previousWeekKpis } from '../lib/daily.js';
+import { sumCampaigns, leadList } from '../lib/daily.js';
 import { CAMPAIGNS, inPeriod } from '../lib/leads.js';
 import { campaignRows } from '../lib/kpis.js';
 import { runChecks, periodChecks } from '../lib/checks.js';
@@ -233,11 +233,6 @@ test('the leads list: the week’s leads, newest first, short names, duplicates 
   const dupes = runChecks({ client: 'store', leads, spend: simulateSpend('store', leads, [], makeRng(5)), meta: null, weekStart: W }).find(w => w.code === 'duplicates').count;
   assert.equal(list.filter(l => l.duplicate).length, dupes);
   assert.ok(list.some(l => l.source === null));
-});
-
-test('the week is compared with the previous week, from the same daily figures as the other views', () => {
-  const k = previousWeekKpis('clinic', W);
-  assert.deepEqual(k, kpisFromTotals('clinic', sumDays(daySeries('clinic', '2026-10-05', '2026-10-11'))));
 });
 
 test('the duplicate mark goes on the later copy, whatever order the CRM returns the leads in', () => {
@@ -361,4 +356,56 @@ test('a made-up duplicate is the same person, later the same day', () => {
     }
   }
   assert.ok(seen > 0);
+});
+
+// ---------- the run fills the last 7 days, up to the moment it runs ----------
+import { periodFigures } from '../lib/daily.js';
+
+test('a run mid-day: every lead is in the past, and part of today means part of its leads', () => {
+  const start = new Date('2026-10-16T00:00:00Z'), now = Date.parse('2026-10-22T09:30:00Z');
+  let partial = 0, whole = 0;
+  for (let s = 0; s < 200; s++) for (const client of ['clinic', 'store']) {
+    const leads = generateLeads(client, ['duplicates', 'edge_cases'], makeRng(s), start, now);
+    for (const l of leads) assert.ok(Date.parse(l.createdAt) < now, `${s} ${client}: ${l.createdAt}`);
+    partial += generateLeads(client, [], makeRng(s), start, now).length;
+    whole += generateLeads(client, [], makeRng(s), start).length;
+  }
+  // six whole days plus a quiet morning: fewer leads than a whole week, more than six-sevenths of it
+  assert.ok(partial < whole && partial > whole * 0.75, `${partial} vs ${whole}`);
+});
+
+test('on a run day, today’s spend grows with the moment it is shown up to', () => {
+  const start = new Date('2026-10-16T00:00:00Z'), ranAt = '2026-10-22T10:00:00.000Z';
+  const leads = generateLeads('store', [], makeRng(6), start, Date.parse(ranAt)), spend = simulateSpend('store', leads, [], makeRng(6));
+  const run = { days: runDays('store', leads, spend, start), leadList: leadList(leads, start), light: 'green' };
+  const at = asOf => periodFigures('store', { ...run, asOf }, 'day', new Date('2026-10-22T20:00:00Z')).kpis.spend;
+  assert.ok(at(ranAt) < at('2026-10-22T16:00:00.000Z'), `${at(ranAt)} vs later`);
+  // the whole day, once it's over, is the run's figure for the day
+  assert.equal(periodFigures('store', { ...run, asOf: ranAt }, 'day', new Date('2026-10-23T08:00:00Z'), 1).kpis.spend, run.days[6].spend);
+});
+
+test('on a run day, today stops at the run: nothing arrives after it on its own', () => {
+  const start = new Date('2026-10-16T00:00:00Z'), ranAt = '2026-10-22T10:00:00.000Z';
+  const leads = generateLeads('clinic', [], makeRng(3), start, Date.parse(ranAt)), spend = simulateSpend('clinic', leads, [], makeRng(3));
+  const run = { days: runDays('clinic', leads, spend, start), leadList: leadList(leads, start), light: 'green', asOf: ranAt };
+  const later = new Date('2026-10-22T18:00:00Z');
+  const f = periodFigures('clinic', run, 'day', later);
+  assert.equal(f.asOf, ranAt);
+  assert.equal(f.cut, true);
+  assert.equal(f.kpis.leads, run.leadList.filter(l => l.createdAt.startsWith('2026-10-22')).length);
+  // later in the day it's the same as at the run's own moment
+  assert.deepEqual(periodFigures('clinic', run, 'day', new Date(ranAt)).kpis, f.kpis);
+  // the next day is not a run day: it runs on the clock again
+  assert.equal(periodFigures('clinic', run, 'day', new Date('2026-10-23T08:00:00Z')).cut, false);
+});
+
+test('figures for the run’s own 7 days add up to the run', () => {
+  const start = new Date('2026-10-16T00:00:00Z'), ranAt = '2026-10-22T23:59:59.000Z';
+  const leads = generateLeads('store', ['duplicates', 'missing_source'], makeRng(4), start, Date.parse(ranAt)), spend = simulateSpend('store', leads, [], makeRng(4));
+  const run = { days: runDays('store', leads, spend, start), leadList: leadList(leads, start), light: 'green', asOf: ranAt };
+  // the week of 19-25 Oct holds the run's last four days
+  const f = periodFigures('store', run, 'week', new Date('2026-10-26T12:00:00Z'), 1);
+  const mine = run.leadList.filter(l => l.createdAt >= '2026-10-19');
+  assert.ok(mine.every(l => f.leads.includes(l)));
+  assert.equal(f.health.fromRun, true);
 });

@@ -492,7 +492,7 @@
         -300
       ],
       "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst pages = n => { const r = [], put = (items, at) => items.forEach((it, k) => (r[at(it.pairedItem?.item ?? k)] ??= []).push(it.json)); put($(n).all(), i => i); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); idx.forEach(i => { r[i] = []; }); put($(`${n} (retry)`).all(), k => idx[k]); } return r; };\n// The report uses what GoHighLevel has, read back from it, like it would for a real client.\nconst job = $('Start report').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nlet steps = job.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nconst readNotes = [], out = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const got = pages(`GHL ${client}: read`);\n  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || []]));\n  const c = joinPages(r.contacts, 'contacts', 100, 100), d = joinPages(r.deals, 'opportunities', 100, 100);\n  const contacts = c?.rows ?? null, deals = d?.rows ?? null;\n  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);\n  else if (c.more || d.more) readNotes.push(`${name}: more than 10000 records; only the first 10000 were read`);\n  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));\n  const leads = (contacts || []).map(c => {\n    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded\n    const d = dealOf.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  const meta = buildMetaEvents(client, leads, job.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend: job.spend[client], ...meta };\n}\nif (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, clients: out, steps } }];"
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst pages = n => { const r = [], put = (items, at) => items.forEach((it, k) => (r[at(it.pairedItem?.item ?? k)] ??= []).push(it.json)); put($(n).all(), i => i); if ($(`${n} (retry)`).isExecuted) { const idx = $(`${n} (refused)`).all().map(i => i.json.i); idx.forEach(i => { r[i] = []; }); put($(`${n} (retry)`).all(), k => idx[k]); } return r; };\n// The report uses what GoHighLevel has, read back from it, like it would for a real client.\nconst job = $('Start report').first().json;\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst nowSec = Math.floor(Date.now() / 1000);\nlet steps = job.steps;\nconst NAMES = {\"clinic\":[\"Clinic\",\"Lumière Skin Clinic\"],\"store\":[\"Store\",\"Northwind Home\"]};\nconst readNotes = [], out = {};\nfor (const [client, [label, name]] of Object.entries(NAMES)) {\n  const got = pages(`GHL ${client}: read`);\n  const r = Object.fromEntries($(`${label}: read`).all().map((s, i) => [s.json.kind, got[i] || []]));\n  const c = joinPages(r.contacts, 'contacts', 100, 100), d = joinPages(r.deals, 'opportunities', 100, 100);\n  const contacts = c?.rows ?? null, deals = d?.rows ?? null;\n  if (!contacts || !deals) readNotes.push(`${name}: GoHighLevel couldn't be read`);\n  else if (c.more || d.more) readNotes.push(`${name}: more than 10000 records; only the first 10000 were read`);\n  const dealOf = new Map((deals || []).map(d => [d.contactId, d]));\n  const leads = (contacts || []).map(c => {\n    // ponytail: the demo's made-up date is kept in a created: tag; a real contact uses its dateAdded\n    const d = dealOf.get(c.id), created = (c.tags || []).find(t => t.startsWith('created:'));\n    return { id: c.id, firstName: c.firstName ?? '', lastName: c.lastName ?? '', email: c.email ?? '', phone: c.phone ?? '', source: c.source ?? null,\n      createdAt: new Date(created ? +created.slice(8) : Date.parse(c.dateAdded)).toISOString(),\n      outcome: !d ? 'open' : d.status === 'won' ? 'converted' : 'cancelled', value: d ? Number(d.monetaryValue) || 0 : 0, flags: [] };\n  });\n  const meta = buildMetaEvents(client, leads, job.problems, nowSec, sha256);\n  out[client] = { client, name, leads, spend: job.spend[client], ...meta };\n}\nif (readNotes.length) steps = setStep(steps, 'ghl', 'failed', readNotes.join('; '));\nsteps = setStep(steps, 'spend', 'done');\nsteps = setStep(steps, 'meta', 'running');\nreturn [{ json: { runId: job.runId, problems: job.problems, weekStart: job.weekStart, ranAt: job.ranAt, clients: out, steps } }];"
       }
     },
     {
@@ -580,147 +580,8 @@
         -300
       ],
       "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst crm = $('CRM data').first().json;\nconst sent = $('Meta requests').all().map(i => i.json), got = $('Meta: send conversions').all().map(i => i.json);\nlet steps = crm.steps, metaFailed = [];\nconst clients = Object.values(crm.clients).map(c => {\n  let meta = { sent: 0, accepted: 0, rejected: 0 };\n  sent.forEach((s, i) => {\n    if (s.client !== c.client || !s.count) return;\n    const r = got[i] || {};\n    meta.sent += s.count;\n    if (s.kind === 'main' && r.statusCode !== 200) { metaFailed.push(`${c.name}: Meta answered ${r.statusCode ?? 'nothing'}`); meta = null; return; }\n    if (!meta) return;\n    const ok = r.statusCode === 200 ? Number(r.body?.events_received) || 0 : 0;\n    if (s.kind === 'main') meta.accepted += ok;\n    meta.rejected += s.count - ok;\n  });\n  const weekStart = new Date(crm.weekStart);\n  const kpis = computeKpis(c.client, c.leads, c.spend, weekStart);\n  const warnings = runChecks({ client: c.client, leads: c.leads, spend: c.spend, meta, weekStart });\n  // compared with the week before, from the same daily figures as the other dashboard views\n  const previousKpis = previousWeekKpis(c.client, weekStart);\n  return { client: c.client, name: c.name, kpis, previousKpis, warnings, skipped: c.skipped, campaigns: campaignRows(c.spend, c.leads, weekStart), days: runDays(c.client, c.leads, c.spend, weekStart), leadList: leadList(c.leads, weekStart) };\n});\nsteps = setStep(steps, 'meta', metaFailed.length ? 'failed' : 'done', metaFailed.join('; ') || undefined);\nsteps = setStep(steps, 'checks', 'done');\nsteps = setStep(steps, 'ai', 'running');\nconst aiInput = buildAiInput(clients);\nconst aiBody = { messages: [{ role: 'system', content: \"You write the weekly results summary that a marketing agency's account manager reads before sending reports to two clients. Use plain, friendly English. Never type a digit. Wherever a number goes, write a placeholder from that client's \\\"placeholders\\\" list in curly braces, exactly as named, for example {costPerLead}. Code replaces each placeholder with the value listed next to it, so you can see what the reader will see. Never calculate new numbers. Use only the placeholders of the client you are writing about. The overview covers both clients and has no numbers or placeholders. Placeholders ending in _change already say which way it went (for example \\\"up 5%\\\" or \\\"down 33%\\\"): write \\\"leads were {leads_change} on the previous week\\\", never \\\"leads rose {leads_change}\\\". Outside the curly braces, never write field names such as costPerLead or paidLeads; say \\\"cost per lead\\\" or \\\"paid leads\\\". The data covers last week (Monday to Sunday). Changes compare with the week before (the previous Monday to Sunday): call it \\\"the previous week\\\". Keep each summary to two or three sentences: say what matters most this week and why, using only the few numbers that support it. Do not list every number; the report shows them all in a table. Explain every warning in client-friendly words, and suggest at most three practical next steps per client. A warning's message contains numbers, so never copy it: explain it in your own words with {<code>_count} (for example {duplicates_count}), or write {<code>_message} on its own to show the check's wording. Every placeholder needs its own label within a few words of it, in the same sentence, like these examples. A placeholder without its label nearby, or right after another number's label, makes the answer invalid.\\n{spend}: next to \\\"spend\\\" or \\\"spent\\\" or \\\"budget\\\", e.g. \\\"ad spend was {spend}\\\"\\n{leads}: next to \\\"lead\\\" or \\\"enquiry\\\" or \\\"enquiries\\\", e.g. \\\"{leads} leads came in\\\"\\n{paidLeads}: next to \\\"paid lead\\\" or \\\"from ads\\\" or \\\"from paid\\\", e.g. \\\"{paidLeads} paid leads\\\"\\n{costPerLead}: next to \\\"per lead\\\" or \\\"per paid lead\\\" or \\\"each lead\\\" or \\\"each paid lead\\\", e.g. \\\"cost per paid lead was {costPerLead}\\\"\\n{cancelled}: next to \\\"cancel\\\" or \\\"refund\\\", e.g. \\\"{cancelled} cancelled bookings\\\"\\n{bookings}: next to \\\"booking\\\" or \\\"booked\\\" or \\\"consultation\\\" or \\\"appointment\\\", e.g. \\\"{bookings} booked consultations\\\"\\n{costPerBooking}: next to \\\"per booking\\\" or \\\"each booking\\\" or \\\"per consultation\\\" or \\\"per appointment\\\", e.g. \\\"cost per booking was {costPerBooking}\\\"\\n{bookingRate}: next to \\\"rate\\\" or \\\"of leads\\\" or \\\"of all leads\\\", e.g. \\\"a booking rate of {bookingRate}\\\"\\n{orders}: next to \\\"order\\\" or \\\"purchase\\\", e.g. \\\"{orders} orders\\\"\\n{revenue}: next to \\\"revenue\\\" or \\\"sales\\\" or \\\"income\\\", e.g. \\\"revenue was {revenue}\\\"\\n{roas}: next to \\\"return on ad spend\\\" or \\\"roas\\\", e.g. \\\"return on ad spend was {roas}\\\"\\n{costPerOrder}: next to \\\"per order\\\" or \\\"each order\\\", e.g. \\\"cost per order was {costPerOrder}\\\"\\n{avgOrderValue}: next to \\\"average order\\\" or \\\"order value\\\", e.g. \\\"the average order was {avgOrderValue}\\\"\\nA {name_change} placeholder needs the same label as {name}, e.g. \\\"leads were {leads_change} on the previous week\\\" or \\\"cost per lead was {costPerLead_change} on the previous week\\\".\\n{meta_mismatch_count}: next to \\\"meta\\\" or \\\"facebook\\\", e.g. \\\"Meta is missing {meta_mismatch_count} bookings\\\"\\n{missing_source_count}: next to \\\"source\\\" or \\\"which ad\\\" or \\\"where they came\\\" or \\\"where it came\\\", e.g. \\\"{missing_source_count} leads have no recorded source\\\"\\n{duplicates_count}: next to \\\"twice\\\" or \\\"duplicate\\\" or \\\"same person\\\" or \\\"more than once\\\", e.g. \\\"{duplicates_count} leads appear twice\\\"\\n{bad_totals_count}: next to \\\"total\\\", e.g. \\\"{bad_totals_count} total that does not add up\\\"\\n{outlier_count}: next to \\\"order\\\" or \\\"large\\\" or \\\"unusual\\\", e.g. \\\"{outlier_count} unusually large order\\\"\\n{meta_rejected_count}: next to \\\"meta\\\" or \\\"facebook\\\" or \\\"reject\\\" or \\\"refuse\\\" or \\\"refused\\\", e.g. \\\"Meta rejected {meta_rejected_count} events\\\"\\nA {code_message} placeholder is the check's own sentence: put it on its own, e.g. \\\"{duplicates_message}\\\". Stay inside the length limits, counted after the placeholders are filled in: overview one sentence under 200 characters, headline under 90, summary under 600, each warning under 300, each next step under 200. Return JSON that matches the schema exactly. 'clinic' is the clinic, 'store' is the store.\" }, { role: 'user', content: JSON.stringify(aiInput) }],\n  response_format: { type: 'json_schema', json_schema: { name: 'weekly_report', strict: true, schema: AI_SCHEMA } } };\nreturn [{ json: { ...crm, clients, aiInput, aiBody, steps } }];"
+        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst crm = $('CRM data').first().json;\nconst sent = $('Meta requests').all().map(i => i.json), got = $('Meta: send conversions').all().map(i => i.json);\nlet steps = crm.steps, metaFailed = [];\nconst clients = Object.values(crm.clients).map(c => {\n  let meta = { sent: 0, accepted: 0, rejected: 0 };\n  sent.forEach((s, i) => {\n    if (s.client !== c.client || !s.count) return;\n    const r = got[i] || {};\n    meta.sent += s.count;\n    if (s.kind === 'main' && r.statusCode !== 200) { metaFailed.push(`${c.name}: Meta answered ${r.statusCode ?? 'nothing'}`); meta = null; return; }\n    if (!meta) return;\n    const ok = r.statusCode === 200 ? Number(r.body?.events_received) || 0 : 0;\n    if (s.kind === 'main') meta.accepted += ok;\n    meta.rejected += s.count - ok;\n  });\n  const weekStart = new Date(crm.weekStart);\n  const kpis = computeKpis(c.client, c.leads, c.spend, weekStart);\n  const warnings = runChecks({ client: c.client, leads: c.leads, spend: c.spend, meta, weekStart });\n  return { client: c.client, name: c.name, kpis, warnings, skipped: c.skipped, campaigns: campaignRows(c.spend, c.leads, weekStart),\n    days: runDays(c.client, c.leads, c.spend, weekStart, meta), leadList: leadList(c.leads, weekStart) };\n});\nsteps = setStep(steps, 'meta', metaFailed.length ? 'failed' : 'done', metaFailed.join('; ') || undefined);\nsteps = setStep(steps, 'checks', 'done');\nreturn [{ json: { ...crm, clients, steps } }];"
       }
-    },
-    {
-      "id": "78a101e0-4b1d-e2fd-783d-ab7bee583a2d",
-      "name": "Save progress 2",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.5,
-      "position": [
-        3960,
-        -300
-      ],
-      "parameters": {
-        "operation": "executeQuery",
-        "query": "-- show the visitor the checks are done\nwith u as (update demo_runs set steps = $2::jsonb where id = $1::uuid)\nselect 1 as saved",
-        "options": {
-          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.steps)] }}"
-        }
-      },
-      "credentials": {
-        "postgres": {
-          "id": "8VYMdYQi4ONq8evJ",
-          "name": "Supabase demo"
-        }
-      }
-    },
-    {
-      "id": "e78b6f3e-7a28-5858-04f7-57e90cf8c3d2",
-      "name": "AI: write summary",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        4180,
-        -300
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'gemini-flash-lite-latest', ...$('Checks').first().json.aiBody }) }}",
-        "options": {
-          "timeout": 45000,
-          "response": {
-            "response": {
-              "fullResponse": true,
-              "neverError": true
-            }
-          }
-        }
-      },
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "OZF5vuPL8kSAiXEF",
-          "name": "Gemini"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "id": "3e9c52a9-133a-f585-e16f-1d7a106a143b",
-      "name": "Check AI answer",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        4400,
-        -300
-      ],
-      "parameters": {
-        "jsCode": "/*@lib*/\nconst ck = $('Checks').first().json;\nreturn [{ json: { ok: !!pickAiAnswer($input.all().map(i => i.json), ck.aiInput, ck.problems.includes('ai_broken')).value } }];"
-      }
-    },
-    {
-      "id": "8b42e93c-423e-02bf-c5c7-2220faf8ec8f",
-      "name": "AI answer ok?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        4620,
-        -300
-      ],
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose"
-          },
-          "conditions": [
-            {
-              "id": "c584f78e-e758-50f5-54f2-2063f0069bba",
-              "leftValue": "={{ $json.ok }}",
-              "rightValue": "",
-              "operator": {
-                "type": "boolean",
-                "operation": "true",
-                "singleValue": true
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      }
-    },
-    {
-      "id": "1a9e644a-e76d-476f-4b5c-b23ad1b80277",
-      "name": "AI: second try",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        4840,
-        -100
-      ],
-      "parameters": {
-        "method": "POST",
-        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ model: 'gemini-flash-latest', ...$('Checks').first().json.aiBody }) }}",
-        "options": {
-          "timeout": 45000,
-          "response": {
-            "response": {
-              "fullResponse": true,
-              "neverError": true
-            }
-          }
-        }
-      },
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "OZF5vuPL8kSAiXEF",
-          "name": "Gemini"
-        }
-      },
-      "onError": "continueRegularOutput"
     },
     {
       "id": "b4f294b3-8b11-8a98-615e-f43b13625806",
@@ -728,11 +589,11 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5060,
+        3960,
         -300
       ],
       "parameters": {
-        "jsCode": "/*@lib*/\nconst setStep = (steps, key, status, reason) => steps.map(s => s.key === key ? (reason ? { key, status, reason } : { key, status }) : s);\nconst ck = $('Checks').first().json;\n// the first model's answer, then the second model's if it was asked\nconst replies = ['AI: write summary', 'AI: second try'].filter(n => $(n).isExecuted).flatMap(n => $(n).all().map(i => i.json));\nconst pick = pickAiAnswer(replies, ck.aiInput, ck.problems.includes('ai_broken'));\nlet steps = ck.steps, ai;\nif (pick.value) { ai = { source: 'ai', value: pick.value }; steps = setStep(steps, 'ai', 'done'); }\nelse {\n  ai = { source: 'template', value: templateSummary(ck.aiInput) };\n  steps = pick.gotAnswer ? setStep(steps, 'ai', 'warning', `AI answer rejected (${pick.errors[0]}); template summary used`)\n    : setStep(steps, 'ai', 'failed', `${pick.errors[0] || 'no AI answer'}; template summary used`);\n}\nconst metaSkipped = ck.clients.reduce((a, c) => a + c.skipped, 0);\nconst report = buildReport({ runId: ck.runId, weekStart: ck.weekStart, clients: ck.clients, steps, ai, problems: ck.problems, metaSkipped });\nreturn [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps } }];"
+        "jsCode": "/*@lib*/\nconst ck = $('Checks').first().json;\nconst metaSkipped = ck.clients.reduce((a, c) => a + c.skipped, 0);\nconst report = buildReport({ runId: ck.runId, weekStart: ck.weekStart, asOf: ck.ranAt, clients: ck.clients, steps: ck.steps, problems: ck.problems, metaSkipped });\nreturn [{ json: { runId: ck.runId, status: report.partial ? 'partial' : 'done', report, steps: ck.steps } }];"
       }
     },
     {
@@ -741,7 +602,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.5,
       "position": [
-        5280,
+        4180,
         -300
       ],
       "parameters": {
@@ -764,7 +625,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        5500,
+        4400,
         -300
       ],
       "parameters": {
@@ -777,7 +638,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        5720,
+        4620,
         -300
       ],
       "parameters": {
@@ -1019,68 +880,6 @@
       ]
     },
     "Checks": {
-      "main": [
-        [
-          {
-            "node": "Save progress 2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Save progress 2": {
-      "main": [
-        [
-          {
-            "node": "AI: write summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "AI: write summary": {
-      "main": [
-        [
-          {
-            "node": "Check AI answer",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check AI answer": {
-      "main": [
-        [
-          {
-            "node": "AI answer ok?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "AI answer ok?": {
-      "main": [
-        [
-          {
-            "node": "Build report",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "AI: second try",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "AI: second try": {
       "main": [
         [
           {

@@ -105,5 +105,24 @@ test('the weekly report only reads GoHighLevel, and the demo hands over to it', 
   assert.deepEqual(link(report, 'Save result'), [['Slack message']]);
   assert.deepEqual(link(report, 'Slack message'), [['Slack: send']]);
   assert.deepEqual(link(wf('error-handler'), 'On error'), [['Mark run failed', 'Slack message']]);
-  for (const n of ['Meta: send conversions', 'AI: write summary', 'Checks']) assert.ok(!demo.nodes.some(x => x.name === n) && report.nodes.some(x => x.name === n), n);
+  for (const n of ['Meta: send conversions', 'Checks']) assert.ok(!demo.nodes.some(x => x.name === n) && report.nodes.some(x => x.name === n), n);
+  // the AI writes only on request, for a period the page names: never in the run
+  const summary = wf('demo-summary');
+  assert.ok(![demo, report].some(w => w.nodes.some(x => x.name.startsWith('AI'))));
+  assert.ok(summary.nodes.some(x => x.name === 'AI: write summary'));
+  assert.deepEqual(link(summary, 'Ask Gemini?'), [['AI: write summary'], ['Build answer']]);
+  assert.deepEqual(link(summary, 'AI answer ok?'), [['Build answer'], ['AI: second try']]);
+  assert.deepEqual(link(summary, 'Keep it?'), [['Keep summary'], ['Respond summary']]);
+});
+
+test('every Code node compiles once the lib is pasted in: no name in a node clashes with the lib', async () => {
+  const { readdirSync } = await import('node:fs');
+  const lib = libSource();
+  for (const f of readdirSync(new URL('../workflows/src/', import.meta.url)).filter(f => f.endsWith('.json'))) {
+    const wf = buildWorkflow(JSON.parse(readFileSync(new URL(`../workflows/src/${f}`, import.meta.url), 'utf8')), lib);
+    for (const n of wf.nodes.filter(n => n.type === 'n8n-nodes-base.code')) {
+      // n8n runs a Code node as the body of an async function
+      assert.doesNotThrow(() => new Function(`return (async () => {\n${n.parameters.jsCode}\n})`), `${f} / ${n.name}`);
+    }
+  }
 });

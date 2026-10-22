@@ -5,7 +5,7 @@ import { generateLeads } from '../lib/leads.js';
 import { simulateSpend } from '../lib/spend.js';
 import { computeKpis } from '../lib/kpis.js';
 import { runChecks } from '../lib/checks.js';
-import { AI_SCHEMA, LABELS, COUNT_LABELS, placeholderGuide, buildAiInput, validateAiOutput, pickAiAnswer, templateDraft, templateSummary, placeholderValues } from '../lib/ai.js';
+import { AI_SCHEMA, LABELS, COUNT_LABELS, placeholderGuide, buildAiInput, validateAiOutput, pickAiAnswer, templateDraft, templateSummary, placeholderValues, periodWords } from '../lib/ai.js';
 
 const W = new Date('2026-10-12T00:00:00Z');
 const NAMES = { clinic: 'Lumière Skin Clinic', store: 'Northwind Home' };
@@ -161,8 +161,26 @@ test('template says "no leads yet" instead of printing nothing-numbers', () => {
     { client: 'store', name: 'Northwind Home', kpis: input.clients[1].kpis, previousKpis: null, warnings: [] },
   ]);
   const t = templateSummary(z);
-  assert.match(t.clients[0].headline + t.clients[0].summary, /no leads yet/i);
+  assert.match(t.clients[0].headline + t.clients[0].summary, /no leads last week/i);
   assert.ok(!/NaN|Infinity|null|undefined/.test(JSON.stringify(t)));
+  // a period still under way says so
+  const now = templateSummary({ ...z, period: periodWords('month', 0, 'week', '2026-10-01') });
+  assert.equal(now.clients[0].headline, 'No leads this month so far');
+});
+
+test('periods are named in words, never digits, and say when they are not over', () => {
+  const all = [];
+  for (const period of ['day', 'week', 'month', 'year']) for (const back of [0, 1, 2]) for (const vs of ['week', 'prev']) {
+    const w = periodWords(period, back, vs, '2026-09-01');
+    all.push(w);
+    assert.ok(!/\d/.test(w.covers + w.vs), JSON.stringify(w));
+    assert.equal(w.finished, back > 0);
+  }
+  assert.deepEqual(periodWords('day', 0, 'week', '2026-10-22'), { covers: 'today so far', vs: 'last Thursday up to the same time', finished: false });
+  assert.deepEqual(periodWords('month', 1, 'week', '2026-09-01'), { covers: 'in September', vs: 'the month before', finished: true });
+  // the template's comparison follows the period
+  const t = templateSummary({ ...input, period: periodWords('year', 0, 'week', '2026-01-01') });
+  assert.match(JSON.stringify(t), /compared with the same days last year/);
 });
 
 test('template uses singular words for one', () => {

@@ -1,0 +1,830 @@
+{
+  "name": "demo-lead",
+  "nodes": [
+    {
+      "id": "1e1aa784-2812-74ff-ca43-84945515c2ce",
+      "name": "Lead webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "demo/lead",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://ibrahim-jaafar.github.io"
+        }
+      },
+      "webhookId": "576daa4e-6f8a-bcf9-54ff-09163a21e912"
+    },
+    {
+      "id": "27ff0a5a-7417-1045-7ef4-510592fa704c",
+      "name": "Latest run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select (select json_build_object('id', id, 'status', status, 'report', report) from demo_runs order by created_at desc limit 1) as latest",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "f5b10637-fb4f-d5fa-023c-c6baba54063f",
+      "name": "Plan test lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nlet ask = $('Lead webhook').first().json.body;\nif (typeof ask === 'string') { try { ask = JSON.parse(ask); } catch { ask = null; } }\nconst client = ask?.client === 'store' ? 'store' : 'clinic';\nconst latest = $input.first().json.latest, rep = latest?.report, now = Date.now();\nconst refuse = (code, error) => [{ json: { refuse: { code, error } } }];\nif (latest?.status === 'running') return refuse(409, 'A run is going: send test leads once it has finished.');\nif (!rep?.asOf || rep.asOf.slice(0, 10) !== new Date(now).toISOString().slice(0, 10)) return refuse(409, 'Test leads join today’s run: run the report first.');\nif ((rep.testLeads || 0) >= 30) return refuse(429, 'This run has had its 30 test leads: run the report again for more.');\nif (now - Date.parse(rep.asOf) < 5000) return refuse(429, 'One test lead every 5 seconds, please.');\n// a mixed seed: seeds a few seconds apart would give nearly the same person\nconst lead = testLead(client, makeRng(seedOf(`${client}:${now}`)), now);\nreturn [{ json: { client, runId: latest.id, lead } }];"
+      }
+    },
+    {
+      "id": "d36c8ba4-a150-0cf0-d3c2-b1f3e4feb5c2",
+      "name": "Allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "70976875-0cb7-6600-9d42-2d33a689a7b1",
+              "leftValue": "={{ !$json.refuse }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b1d00d8d-c2c3-30b5-7d57-723ac3083876",
+      "name": "Clinic?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "1146e3b6-d6c1-8409-5a8f-f9f979f775a9",
+              "leftValue": "={{ $json.client === 'clinic' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "092f7fbf-2b9b-a97b-a25a-3ea0e3b2cbd3",
+      "name": "Clinic: test contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const t = $input.first().json;\nreturn [{ json: { req: { method: 'POST', url: 'https://services.leadconnectorhq.com/contacts/', body: { locationId: 'lX1GDRcqD985tKgOM4I3', firstName: t.lead.firstName, lastName: t.lead.lastName, email: t.lead.email, phone: t.lead.phone,\n    tags: ['demo', 'test-lead', `run:${t.runId}`, `created:${Date.parse(t.lead.createdAt)}`], ...(t.lead.source ? { source: t.lead.source } : {}) } } } }];"
+      }
+    },
+    {
+      "id": "ff9e8cc9-fa62-e3fe-1548-f1bca3498755",
+      "name": "GHL clinic: test contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "03bbe1b6-a2b1-72cd-b9cb-fe206b0ffd14",
+      "name": "Clinic: test deal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Lumière Skin Clinic: a deal when the test lead booked, ordered, cancelled or was refunded\nconst t = $('Plan test lead').first().json, r = $input.first().json;\nconst contactId = r.statusCode < 300 ? r.body?.contact?.id : null;\nconst G = 'https://services.leadconnectorhq.com';\nif (contactId && t.lead.outcome !== 'open') return [{ json: { contactId, req: { method: 'POST', url: `${G}/opportunities/`, body: {\n  locationId: 'lX1GDRcqD985tKgOM4I3', pipelineId: 'e3YMhd6OJWtcGA9MFPnx', pipelineStageId: '8530b169-8cdc-4a71-bfc7-165e969395a6', contactId,\n  name: `${t.lead.firstName} ${t.lead.lastName} – consultation`, status: t.lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: t.lead.value } } } }];\n// ponytail: one harmless lookup when there's no deal to save (n8n stops a branch with no items)\nreturn [{ json: { contactId, req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: 'lX1GDRcqD985tKgOM4I3', pageLimit: 1 } } } }];"
+      }
+    },
+    {
+      "id": "3564b8f6-0d30-3294-1c6a-20369d407d38",
+      "name": "GHL clinic: test deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        0
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "6wOv1jbcxuGfNH6R",
+          "name": "GHL clinic"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "69f3f6a1-a418-e87f-50f9-ac063c00196a",
+      "name": "Clinic saved",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "58306d8b-e677-17dc-dee9-4802dfd004ba",
+      "name": "Store: test contact",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const t = $input.first().json;\nreturn [{ json: { req: { method: 'POST', url: 'https://services.leadconnectorhq.com/contacts/', body: { locationId: 'VxYMePPrdwUBRt79Z4wC', firstName: t.lead.firstName, lastName: t.lead.lastName, email: t.lead.email, phone: t.lead.phone,\n    tags: ['demo', 'test-lead', `run:${t.runId}`, `created:${Date.parse(t.lead.createdAt)}`], ...(t.lead.source ? { source: t.lead.source } : {}) } } } }];"
+      }
+    },
+    {
+      "id": "73421905-4f1d-3b23-04c4-5503f4c667bc",
+      "name": "GHL store: test contact",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        200
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a7bb0c35-1934-80e6-2baf-f58d08f51ed5",
+      "name": "Store: test deal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        200
+      ],
+      "parameters": {
+        "jsCode": "// Northwind Home: a deal when the test lead booked, ordered, cancelled or was refunded\nconst t = $('Plan test lead').first().json, r = $input.first().json;\nconst contactId = r.statusCode < 300 ? r.body?.contact?.id : null;\nconst G = 'https://services.leadconnectorhq.com';\nif (contactId && t.lead.outcome !== 'open') return [{ json: { contactId, req: { method: 'POST', url: `${G}/opportunities/`, body: {\n  locationId: 'VxYMePPrdwUBRt79Z4wC', pipelineId: 'F1gLtHkYfr2SF8ulCrzs', pipelineStageId: 'e5dc2f2e-3fdc-4e7d-af22-88009d9f79c3', contactId,\n  name: `${t.lead.firstName} ${t.lead.lastName} – order`, status: t.lead.outcome === 'converted' ? 'won' : 'lost', monetaryValue: t.lead.value } } } }];\n// ponytail: one harmless lookup when there's no deal to save (n8n stops a branch with no items)\nreturn [{ json: { contactId, req: { method: 'POST', url: `${G}/contacts/search`, body: { locationId: 'VxYMePPrdwUBRt79Z4wC', pageLimit: 1 } } } }];"
+      }
+    },
+    {
+      "id": "28f80c5a-ba5f-144b-c97e-bd87bb4a5823",
+      "name": "GHL store: test deal",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        200
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Version",
+              "value": "2021-07-28"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "RlsELkh82v73dkEB",
+          "name": "GHL store"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "53e8db8b-5f87-11fe-fe23-c1094fdad7f8",
+      "name": "After GoHighLevel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        0
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst t = $('Plan test lead').first().json, label = t.client === 'clinic' ? 'Clinic' : 'Store';\nconst deal = $(`${label}: test deal`).first().json, dealReply = $input.first().json;\nconst saved = !!deal.contactId, dealOk = t.lead.outcome === 'open' || dealReply.statusCode < 300;\nif (!saved) return [{ json: { ...t, saved, dealOk, meta: null } }];\n// a booking or order goes to Meta, like the run's\nconst crypto = require('crypto');\nconst sha256 = s => crypto.createHash('sha256').update(s).digest('hex');\nconst ev = buildMetaEvents(t.client, [t.lead], [], Math.floor(Date.now() / 1000), sha256).events;\nconst meta = ev.length ? { method: 'POST', url: 'https://graph.facebook.com/v23.0/2897515730634456/events', body: { data: ev, test_event_code: 'TEST68789' } } : null;\nreturn [{ json: { ...t, saved, dealOk, meta, req: meta } }];"
+      }
+    },
+    {
+      "id": "d2a90603-6117-2bd4-b588-29f8535c5222",
+      "name": "To Meta?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2200,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "4bf1eda0-49e3-3117-aebc-32bc3e245b87",
+              "leftValue": "={{ !!$json.meta }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "024e03eb-9948-c13c-a705-0a4f1cb21766",
+      "name": "Meta: send test conversion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2420,
+        0
+      ],
+      "parameters": {
+        "method": "={{ $json.req.method }}",
+        "url": "={{ $json.req.url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": false,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.req.body ?? {}) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k6Iu2Bgfzguocbux",
+          "name": "Meta CAPI"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "493a092a-666b-5dff-572b-05a51f0d2846",
+      "name": "Add to the run",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        0
+      ],
+      "parameters": {
+        "jsCode": "/*@lib*/\nconst t = $('After GoHighLevel').first().json, latest = $('Latest run').first().json.latest;\nconst metaReply = $('Meta: send test conversion').isExecuted ? $('Meta: send test conversion').first().json : null;\nconst metaOk = !!metaReply && metaReply.statusCode === 200 && Number(metaReply.body?.events_received) === 1;\nif (!t.saved) return [{ json: { code: 502, save: false, body: { error: 'GoHighLevel didn’t take the test lead. Please try again in a minute.' } } }];\nconst report = addTestLead(latest.report, t.client, t.lead, metaOk);\nconst name = `${t.lead.firstName} ${[...t.lead.lastName][0] ?? ''}.`;\nreturn [{ json: { code: 200, save: true, runId: t.runId, report, body: { name, client: t.client, source: t.lead.source, outcome: t.lead.outcome, value: t.lead.value,\n  createdAt: t.lead.createdAt, deal: t.lead.outcome === 'open' ? null : t.dealOk, meta: t.meta ? metaOk : null } } }];"
+      }
+    },
+    {
+      "id": "399c12b1-c22f-c677-f73f-2196607618b2",
+      "name": "Save it?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2860,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "cf6f8592-e7cc-3d4e-b020-770d06814883",
+              "leftValue": "={{ $json.save }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c52e2dd7-7cff-3fcc-2c71-70cc3ef27acb",
+      "name": "Save the run",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3080,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update demo_runs set report = $2::jsonb where id = $1::uuid returning id",
+        "options": {
+          "queryReplacement": "={{ [$json.runId, JSON.stringify($json.report)] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "8VYMdYQi4ONq8evJ",
+          "name": "Supabase demo"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "id": "47a88cfb-bfa6-3dc9-d16f-18cac176e8b9",
+      "name": "Respond test lead",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3300,
+        0
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($('Add to the run').first().json.body) }}",
+        "options": {
+          "responseCode": "={{ $('Add to the run').first().json.code }}"
+        }
+      }
+    },
+    {
+      "id": "c0d9fd20-16df-5dbb-8cfd-a87f5a787ec7",
+      "name": "Respond refused",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        400
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.refuse.error }) }}",
+        "options": {
+          "responseCode": "={{ $json.refuse.code }}"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Lead webhook": {
+      "main": [
+        [
+          {
+            "node": "Latest run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Latest run": {
+      "main": [
+        [
+          {
+            "node": "Plan test lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Plan test lead": {
+      "main": [
+        [
+          {
+            "node": "Allowed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Allowed?": {
+      "main": [
+        [
+          {
+            "node": "Clinic?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond refused",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic?": {
+      "main": [
+        [
+          {
+            "node": "Clinic: test contact",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Store: test contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic: test contact": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: test contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: test contact": {
+      "main": [
+        [
+          {
+            "node": "Clinic: test deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic: test deal": {
+      "main": [
+        [
+          {
+            "node": "GHL clinic: test deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL clinic: test deal": {
+      "main": [
+        [
+          {
+            "node": "Clinic saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store: test contact": {
+      "main": [
+        [
+          {
+            "node": "GHL store: test contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: test contact": {
+      "main": [
+        [
+          {
+            "node": "Store: test deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store: test deal": {
+      "main": [
+        [
+          {
+            "node": "GHL store: test deal",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GHL store: test deal": {
+      "main": [
+        [
+          {
+            "node": "After GoHighLevel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clinic saved": {
+      "main": [
+        [
+          {
+            "node": "After GoHighLevel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "After GoHighLevel": {
+      "main": [
+        [
+          {
+            "node": "To Meta?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "To Meta?": {
+      "main": [
+        [
+          {
+            "node": "Meta: send test conversion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Add to the run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meta: send test conversion": {
+      "main": [
+        [
+          {
+            "node": "Add to the run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add to the run": {
+      "main": [
+        [
+          {
+            "node": "Save it?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save it?": {
+      "main": [
+        [
+          {
+            "node": "Save the run",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond test lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save the run": {
+      "main": [
+        [
+          {
+            "node": "Respond test lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
