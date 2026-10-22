@@ -144,7 +144,7 @@ test('live uses the run’s real day for "same time last week" when it has one',
 
 // ---------- campaigns per day, leads list, previous week ----------
 import { sumCampaigns, leadList, previousWeekKpis } from '../lib/daily.js';
-import { CAMPAIGNS } from '../lib/leads.js';
+import { CAMPAIGNS, inPeriod } from '../lib/leads.js';
 import { campaignRows } from '../lib/kpis.js';
 import { runChecks } from '../lib/checks.js';
 
@@ -239,4 +239,69 @@ test('the duplicate mark goes on the later copy, whatever order the CRM returns 
       }
     }
   }
+});
+
+// ---------- made-up people, live counting, the same scale everywhere ----------
+import { historyLeads, periodLeads } from '../lib/daily.js';
+
+test('the made-up people behind a day add up to that day', () => {
+  for (const client of ['clinic', 'store']) for (let i = 0; i < 120; i++) {
+    const day = addDays('2026-01-01', i), d = historyDay(client, day), ls = historyLeads(client, day);
+    const conv = ls.filter(l => l.outcome === 'converted');
+    assert.equal(ls.length, d.leads);
+    assert.equal(ls.filter(l => l.source !== 'organic').length, d.paidLeads);
+    assert.equal(conv.length, d.conversions);
+    assert.equal(ls.filter(l => l.outcome === 'cancelled').length, d.cancelled);
+    assert.ok(near(conv.reduce((a, l) => a + l.value, 0), d.revenue));
+    for (const c of d.campaigns) assert.equal(ls.filter(l => l.source === c.name).length, c.paidLeads);
+    assert.ok(ls.every(l => dayKey(l.createdAt) === day && /^\S+ \S\.$/.test(l.name)));
+    assert.deepEqual(ls.map(l => l.createdAt), [...ls.map(l => l.createdAt)].sort().reverse());
+  }
+});
+
+test('live counts the people who have come in, and agrees with its own list and hours', () => {
+  for (let m = 0; m <= 24 * 60; m += 37) {
+    const now = new Date(Date.UTC(2026, 9, 21, 0, m)), l = liveToday('clinic', now);
+    assert.equal(l.leads.length, l.totals.leads);
+    assert.ok(l.leads.every(x => Date.parse(x.createdAt) < +now));
+    assert.equal(l.hours.reduce((a, h) => a + h.leads, 0), l.totals.leads);
+    assert.equal(l.campaigns.reduce((a, c) => a + c.paidLeads, 0), l.totals.paidLeads);
+  }
+  const end = liveToday('store', new Date(Date.UTC(2026, 9, 21, 23, 59, 59, 999))), full = historyDay('store', '2026-10-21');
+  for (const f of ['leads', 'paidLeads', 'conversions', 'cancelled', 'revenue']) assert.equal(end.totals[f], full[f], f);
+});
+
+test('live uses the run’s own leads for last week when it has them', () => {
+  const leads = generateLeads('clinic', [], makeRng(2), W), spend = simulateSpend('clinic', leads, [], makeRng(2));
+  const rows = runDays('clinic', leads, spend, W), list = leadList(leads, W);
+  const l = liveToday('clinic', new Date(Date.UTC(2026, 9, 21, 23, 59, 59, 999)), rows, list);
+  assert.equal(l.lastWeek.totals.leads, rows.find(r => r.day === '2026-10-14').leads);
+  assert.equal(l.lastWeek.totals.revenue, rows.find(r => r.day === '2026-10-14').revenue);
+});
+
+test('a period’s leads: the run’s own on its days, made-up people on the rest', () => {
+  const leads = generateLeads('store', [], makeRng(8), W), spend = simulateSpend('store', leads, [], makeRng(8));
+  const rows = runDays('store', leads, spend, W), list = leadList(leads, W);
+  const all = periodLeads('store', '2026-10-01', '2026-10-21', rows, list);
+  assert.equal(all.length, sumDays(daySeries('store', '2026-10-01', '2026-10-21', rows)).leads);
+  assert.equal(all.filter(l => l.createdAt.slice(0, 10) >= '2026-10-12' && l.createdAt.slice(0, 10) <= '2026-10-18').length, list.length);
+});
+
+test('a run week is about as busy as a made-up week, with or without test mistakes', () => {
+  for (const client of ['clinic', 'store']) {
+    const avg = (n, f) => { let t = 0; for (let i = 0; i < n; i++) t += f(i); return t / n; };
+    const hist = avg(52, i => sumDays(daySeries(client, addDays('2025-10-13', 7 * i), addDays('2025-10-19', 7 * i))).leads);
+    const clean = avg(200, s => generateLeads(client, [], makeRng(s), W).filter(l => inPeriod(l, W)).length);
+    const messy = avg(200, s => generateLeads(client, ['edge_cases'], makeRng(s), W).filter(l => inPeriod(l, W)).length);
+    assert.ok(Math.abs(clean / hist - 1) < 0.2, `${client} clean ${clean} vs history ${hist}`);
+    // the clinic's edge cases empty the week half the time, so only the store's is held to the same range
+    if (client === 'store') assert.ok(Math.abs(messy / hist - 1) < 0.35, `${client} edge cases ${messy} vs history ${hist}`);
+  }
+});
+
+test('run leads split over campaigns like the history does', () => {
+  const n = {};
+  for (let s = 0; s < 300; s++) for (const l of generateLeads('clinic', [], makeRng(s), W)) if (l.source !== 'organic') n[l.source] = (n[l.source] || 0) + 1;
+  const total = Object.values(n).reduce((a, x) => a + x, 0);
+  assert.ok(n['Botox Spring'] / total > 0.38 && n['Skin Consultation'] / total < 0.28, JSON.stringify(n));
 });
