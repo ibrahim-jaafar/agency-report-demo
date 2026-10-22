@@ -83,7 +83,7 @@ test('pickAiAnswer takes the first reply that passes, and says why the others fa
   assert.equal(p.value.clients[0].headline, '58 leads and 14 booked consultations');
   assert.match(p.errors[0], /types a number/);
   const none = pickAiAnswer([{ error: { message: 'timeout' } }, { statusCode: 503, body: {} }], input);
-  assert.deepEqual([none.value, none.gotAnswer, none.errors], [null, false, ['AI service answered nothing', 'AI service answered 503']]);
+  assert.deepEqual([none.value, none.gotAnswer, none.errors], [null, false, ['AI service timed out', 'AI service answered 503']]);
   const broken = pickAiAnswer([reply(good)], input, true);
   assert.equal(broken.value, null);
   assert.equal(broken.gotAnswer, true, 'the AI answered; the demo swapped it for a refusal');
@@ -232,4 +232,10 @@ test('every KPI and warning has a label, and the AI guide shows each one', () =>
 test('return on ad spend reads with its ×', () => {
   const v = placeholderValues({ kpis: { roas: 3.21 }, changes: null, warnings: [] });
   assert.equal(v.roas, '3.21×');
+});
+
+test('when the AI gives no answer, the reason says which: a status, a timeout, or nothing', () => {
+  assert.deepEqual(pickAiAnswer([{ statusCode: 503, body: {} }], input).errors, ['AI service answered 503']);
+  assert.deepEqual(pickAiAnswer([{ error: { message: 'timeout of 45000ms exceeded' } }], input).errors, ['AI service timed out']);
+  assert.deepEqual(pickAiAnswer([{}], input).errors, ['AI service answered nothing']);
 });
