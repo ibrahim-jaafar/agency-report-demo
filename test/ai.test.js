@@ -5,7 +5,7 @@ import { generateLeads } from '../lib/leads.js';
 import { simulateSpend } from '../lib/spend.js';
 import { computeKpis } from '../lib/kpis.js';
 import { runChecks } from '../lib/checks.js';
-import { AI_SCHEMA, LABELS, COUNT_LABELS, placeholderGuide, buildAiInput, validateAiOutput, pickAiAnswer, templateDraft, templateSummary, placeholderValues, periodWords } from '../lib/ai.js';
+import { AI_SCHEMA, LABELS, placeholderGuide, buildAiInput, validateAiOutput, pickAiAnswer, templateDraft, templateSummary, placeholderValues, periodWords } from '../lib/ai.js';
 
 const W = new Date('2026-10-12T00:00:00Z');
 const NAMES = { clinic: 'Lumière Skin Clinic', store: 'Northwind Home' };
@@ -32,7 +32,7 @@ const input = buildAiInput([
 const good = {
   overview: 'Both clients are on track; the clinic needs a source clean-up.',
   clients: [
-    { client: 'clinic', headline: '{leads} leads and {bookings} booked consultations', summary: 'Leads were {leads_change} on the previous report, at {costPerLead} per lead. Booking rate was {bookingRate}.', warnings_explained: ['{missing_source_count} leads have no source.'], next_steps: ['Fix lead source tagging.'] },
+    { client: 'clinic', headline: '{leads} leads and {bookings} booked consultations', summary: 'Leads were {leads_change} on the previous report, at {costPerLead} per lead. Booking rate was {bookingRate}.', warnings_explained: ['{missing_source_message} Ask whoever runs the forms to check them.'], next_steps: ['Fix lead source tagging.'] },
     { client: 'store', headline: '{revenue} revenue from {orders} orders', summary: 'Return on ad spend was {roas} on {spend} of spend.', warnings_explained: [], next_steps: [] },
   ],
 };
@@ -62,7 +62,8 @@ test('input lists each placeholder with the value the reader will see', () => {
   assert.equal(p.bookingRate, '24.1%');
   assert.equal(p.leads_change, 'up 16%');
   assert.equal(p.costPerLead_change, 'down 1%');
-  assert.equal(p.missing_source_count, '3');
+  assert.match(p.missing_source_message, /^3 leads have no recorded source/);
+  assert.ok(!('missing_source_count' in p), 'a count would invite "1 bookings": the message says it');
   assert.equal(input.clients[1].placeholders.revenue, '$4,820.00');
   assert.ok(!('leads_change' in input.clients[1].placeholders), 'no previous report, so no change');
 });
@@ -142,6 +143,20 @@ test('rejects up/down words next to a change, which already says it', () => {
   }
 });
 
+test('rejects a comparison with a different time than the period\'s own', () => {
+  const day = { ...input, period: periodWords('day', 1, 'week', '2026-10-21') }; // yesterday vs the Wednesday before
+  for (const [text, ok] of [['Leads were {leads_change} compared with the Wednesday before.', true],
+    ['Leads were {leads_change} compared with the same days last month.', false], ['Leads were {leads_change} compared with last week.', false]]) {
+    const o = structuredClone(good);
+    o.clients[0].summary = text;
+    assert.equal(validateAiOutput(o, day).ok, ok, text);
+  }
+  const week = { ...input, period: periodWords('week', 1, 'week', '2026-10-12') }; // last week vs the week before
+  const o = structuredClone(good);
+  o.clients[0].summary = 'Last week leads were {leads_change} compared with the same days last week.';
+  assert.equal(validateAiOutput(o, week).ok, false);
+});
+
 test('template follows the same placeholder rules, for every kind of week', () => {
   for (let s = 0; s < 40; s++) for (const p of [[], ['edge_cases'], ['missing_source', 'duplicates', 'bad_totals', 'edge_cases']]) {
     const inp = sample(s, p);
@@ -210,7 +225,6 @@ test('every number must sit next to its own label', () => {
     'Leads were {leads_change} on the previous report.',
     'Your booking rate was {bookingRate}, and {bookings} consultations were booked.',
     'Keep an eye on the cost per lead, which is currently {costPerLead}.',
-    'There are {missing_source_count} leads that do not show where they came from.',
     '{missing_source_message}',
   ]) assert.equal(check(text).ok, true, `${text}: ${check(text).errors}`);
 });
@@ -218,11 +232,10 @@ test('every number must sit next to its own label', () => {
 test('every KPI and warning has a label, and the AI guide shows each one', () => {
   const kpis = ['spend', 'leads', 'paidLeads', 'costPerLead', 'cancelled', 'bookings', 'costPerBooking', 'bookingRate', 'orders', 'revenue', 'roas', 'costPerOrder', 'avgOrderValue'];
   assert.deepEqual(Object.keys(LABELS).sort(), [...kpis].sort());
-  assert.deepEqual(Object.keys(COUNT_LABELS).sort(), ['bad_totals', 'duplicates', 'meta_mismatch', 'meta_rejected', 'missing_source', 'outlier']);
   const guide = placeholderGuide();
-  for (const k of [...kpis, ...Object.keys(COUNT_LABELS).map(c => `${c}_count`)]) assert.ok(guide.includes(`{${k}}:`), k);
+  for (const k of kpis) assert.ok(guide.includes(`{${k}}:`), k);
   // the guide's own examples must pass the check it describes (other errors, like a number with no value for this client, don't matter here)
-  for (const l of [...Object.values(LABELS), ...Object.values(COUNT_LABELS)]) {
+  for (const l of Object.values(LABELS)) {
     const o = structuredClone(good); o.clients[0].summary = l.example;
     const errors = validateAiOutput(o, input).errors || [];
     assert.deepEqual(errors.filter(e => /near it|right after/.test(e)), [], l.example);

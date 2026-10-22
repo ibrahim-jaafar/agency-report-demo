@@ -62,6 +62,7 @@ test('same person at both clients is not a duplicate (checks run per client)', (
 test('totals that do not add up', () => {
   assert.deepEqual(codes(run({ spend: spend(12.5) })), ['bad_totals']);
   assert.deepEqual(run({ spend: spend(10.004) }), []);
+  assert.match(run({ spend: spend(8060.51) })[0].message, /\$8,060\.51/);
 });
 
 test('large order is flagged as an outlier (store, 3+ orders)', () => {
