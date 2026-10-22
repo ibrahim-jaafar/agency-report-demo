@@ -4,13 +4,14 @@ This guide is for the account manager who reads the report before it goes to a c
 
 ## How to tell something is wrong
 
-- **The lights on each client card**
+- **The light next to each client's name** (the tabs above the dashboard), repeated in the **Data health** box of the Week view:
   - Green: every check passed and the report can be sent.
-  - Orange: the data has a problem. Read the warnings on the card before sending anything.
+  - Orange: the data has a problem. Read the warnings in Data health before sending anything.
   - Red: a step failed, so the numbers may be incomplete. Don't send this report.
-- **"Partial report"** under the summary means a step failed and the report was built without it.
-- **"This summary was written by the template"** means the AI's answer was refused or the AI didn't answer. The numbers are still correct either way (code fills them in for the AI and the template); only the wording is plainer.
-- **The workflow strip** shows each step: green is done, orange is done with a warning, red failed (its reason is written under it), and grey "Stopped" means the run ended before reaching that step.
+- **The bar at the top** shows the step a run is on while it runs, then how it ended: "✓ Done · all checks passed", "✓ Done · N warnings", "Done, but a step failed: …" (with the reason), or "The run hit an error and stopped at: …".
+- **The ? button → Latest run:**
+  - **"Partial report"** means a step failed and the report was built without it.
+  - **"The summary was written by the template"** means the AI's answer was refused or the AI didn't answer. The numbers are still correct either way (code fills them in for the AI and the template); only the wording is plainer.
 
 ## What each warning means and what to do
 
@@ -38,4 +39,4 @@ This guide is for the account manager who reads the report before it goes to a c
 Escalate when the same step fails twice in a row, or a red light stays after a rerun. Send:
 
 - the **time** you ran it (the maintainer finds the run by its time),
-- a **screenshot** of the workflow strip and the client cards.
+- a **screenshot** of the bar at the top and the client's Week view (with Data health).
