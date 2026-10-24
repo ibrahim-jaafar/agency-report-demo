@@ -589,6 +589,13 @@ const weeklyReport = workflow('weekly-report', [...report,
   { branch: ['Read everything?', 1], x: 3080 },
   { name: 'Read again soon', y: -100, type: 'n8n-nodes-base.wait', v: 1.1, params: { resume: 'timeInterval', amount: 5, unit: 'seconds' }, extra: { webhookId: sid('read again') } },
 ]);
+// the editor's "Tidy up" layout (Ibrahim's, it's the portfolio picture): one line, retries above, the re-read loop below
+const REPORT_LAYOUT = { 'Start report': 64, 'Clinic: read': 64, 'GHL clinic: read (pause)': -80, 'GHL clinic: read (retry)': -80,
+  'GHL store: read (pause)': -80, 'GHL store: read (retry)': -80 };
+weeklyReport.nodes.forEach((n, i) => {
+  if (n.name === 'Read again soon') n.position = [3376, 160];
+  else n.position = [16 + 224 * i, REPORT_LAYOUT[n.name] ?? (i > 14 ? -48 : 0)];
+});
 
 const demoStatus = workflow('demo-status', [
   { name: 'Status webhook', type: 'n8n-nodes-base.webhook', v: 2, params: { httpMethod: 'GET', path: 'demo/status', responseMode: 'lastNode', options: { allowedOrigins: ORIGIN } }, extra: { webhookId: sid('demo/status') } },
