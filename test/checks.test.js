@@ -71,6 +71,18 @@ test('large order is flagged as an outlier (store, 3+ orders)', () => {
   assert.deepEqual(codes(w), ['outlier']);
 });
 
+test('each order is measured against the other orders, so a big one cannot raise its own bar', () => {
+  const orders = vs => vs.map(v => lead({ outcome: 'converted', value: v }));
+  const meta = { sent: 4, accepted: 4, rejected: 0 };
+  // the other three have a median of 143, and 1,430 is 10x that (the whole list's upper middle, 294, would hide it)
+  assert.deepEqual(codes(run({ leads: orders([125, 143, 294, 1430]), meta })), ['outlier']);
+  // 400 is under 5x the others' median (100), so it's a normal order
+  assert.deepEqual(run({ leads: orders([100, 120, 90, 400]), meta }), []);
+  // an even number of others: their median is the average of the two middle ones, (100 + 200) / 2 = 150
+  assert.deepEqual(codes(run({ leads: orders([90, 100, 200, 300, 751]), meta: { ...meta, sent: 5, accepted: 5 } })), ['outlier']);
+  assert.deepEqual(run({ leads: orders([90, 100, 200, 300, 749]), meta: { ...meta, sent: 5, accepted: 5 } }), []);
+});
+
 test('Meta rejected events raise a warning', () => {
   assert.deepEqual(codes(run({ meta: { sent: 1, accepted: 0, rejected: 1 } })), ['meta_rejected']);
 });

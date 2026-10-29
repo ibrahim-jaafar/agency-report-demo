@@ -108,6 +108,35 @@ test('the report reads GoHighLevel again while its search finds fewer contacts t
   assert.ok(!run([contact('s1')], 0, null).again, 'a real client has no saved count, so one read is enough');
 });
 
+test('the report reads GoHighLevel again while its search finds fewer deals than the run saved', () => {
+  // a new deal shows up in search a few seconds after it's saved (measured 2026-10-28: 4 to 7 s, three times out of three)
+  const tpl = JSON.parse(readFileSync(new URL('../workflows/src/weekly-report.json', import.meta.url), 'utf8'));
+  const code = buildWorkflow(tpl, libSource()).nodes.find(n => n.name === 'CRM data').parameters.jsCode;
+  const steps = [{ key: 'ghl', status: 'done' }, { key: 'spend', status: 'pending' }, { key: 'meta', status: 'pending' }];
+  const job = { runId: 'r', problems: [], weekStart: '2026-10-12T00:00:00.000Z', ranAt: '2026-10-19T00:00:00.000Z', steps,
+    spend: { clinic: {}, store: {} }, select: { tag: 'run:r' }, saved: { clinic: 1, store: 2 }, savedDeals: { clinic: 0, store: 2 } };
+  const contact = id => ({ id, firstName: 'A', tags: ['created:1792000000000'] });
+  const deal = contactId => ({ id: 'd-' + contactId, contactId, status: 'won', monetaryValue: 100, createdAt: '2026-10-18T00:00:00.000Z' });
+  const run = (storeDeals, runIndex, savedDeals = job.savedDeals) => {
+    const nodes = { 'Start report': [{ json: { ...job, savedDeals } }] };
+    for (const [label, cs, ds] of [['Clinic', [contact('c1')], []], ['Store', [contact('s1'), contact('s2')], storeDeals]]) {
+      const c = label.toLowerCase();
+      nodes[`${label}: read`] = [{ json: { kind: 'contacts' } }, { json: { kind: 'deals' } }];
+      nodes[`GHL ${c}: read`] = [{ json: { statusCode: 200, body: { contacts: cs } }, pairedItem: { item: 0 } }, { json: { statusCode: 200, body: { opportunities: ds } }, pairedItem: { item: 1 } }];
+    }
+    const $ = n => ({ all: () => nodes[n], first: () => nodes[n][0], isExecuted: n in nodes });
+    return new Function('$', '$runIndex', 'require', code)($, runIndex, () => ({ createHash: () => ({ update: () => ({ digest: () => 'h' }) }) }))[0].json;
+  };
+  assert.equal(run([deal('s1')], 0).again, true);
+  const last = run([deal('s1')], 5);
+  assert.ok(!last.again);
+  assert.deepEqual(last.steps[0], { key: 'ghl', status: 'warning', reason: "Northwind Home: GoHighLevel's search found 1 of the 2 deals saved" });
+  assert.ok(!run([deal('s1'), deal('s2')], 0).again);
+  // deals from other runs in the same pipeline don't count
+  assert.equal(run([deal('s1'), deal('other')], 0).again, true);
+  assert.ok(!run([deal('s1')], 0, null).again, 'a real client has no saved count, so one read is enough');
+});
+
 test("only the report's reads page through GoHighLevel; saves send one request each", () => {
   const wf = name => JSON.parse(readFileSync(new URL(`../workflows/src/${name}.json`, import.meta.url), 'utf8'));
   const paged = w => wf(w).nodes.filter(n => n.parameters.options?.pagination).map(n => n.name);

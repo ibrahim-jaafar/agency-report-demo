@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeRng } from '../lib/rng.js';
 import { generateLeads, normalisePhone, normaliseEmail, inPeriod, joinPages } from '../lib/leads.js';
+import { runChecks } from '../lib/checks.js';
 
 const W = new Date('2026-10-12T00:00:00Z');
 const DAY = 864e5;
@@ -81,6 +82,15 @@ test('edge cases: store gets a 10x outlier order', () => {
   const others = l.filter(x => x.outcome === 'converted' && x !== o).map(x => x.value).sort((a, b) => a - b);
   assert.ok(others.length >= 2);
   assert.ok(o.value >= 5 * others[Math.floor(others.length / 2)]);
+});
+
+test('edge cases: the check always flags the planted order', () => {
+  for (let s = 0; s < 500; s++) {
+    const l = generateLeads('store', ['edge_cases'], makeRng(s), W);
+    const conv = l.filter(x => x.outcome === 'converted').length;
+    const w = runChecks({ client: 'store', leads: l, spend: { campaigns: [], reportedTotal: 0 }, meta: { sent: conv, accepted: conv, rejected: 0 }, weekStart: W });
+    assert.ok(w.some(x => x.code === 'outlier'), `seed ${s}: ${l.filter(x => x.outcome === 'converted').map(x => x.value)}`);
+  }
 });
 
 test('edge cases: clinic sometimes has zero leads', () => {
