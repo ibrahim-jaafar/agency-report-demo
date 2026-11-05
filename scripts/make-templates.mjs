@@ -439,11 +439,11 @@ const cleanup = (c, y) => {
 // ---------- the AI summary, on request, for whatever period the dashboard shows ----------
 // The page sends only which period (no numbers, no text): the figures are worked out here from the latest report
 // with the same code the dashboard uses, so nobody can feed the AI their own words. One answer covers both clients.
-// Answers are kept (demo_summaries): a finished period is written once per run, one still under way once an hour.
+// Answers are kept (demo_summaries, with row security on like every table: only n8n reads it): a finished period is written once per run, one still under way once an hour.
 const SUMMARY_AI_PER_DAY = 40; // Gemini's free tier is 20 a day per model; past this the template writes
 const summary = [
   { name: 'Summary webhook', type: 'n8n-nodes-base.webhook', v: 2, params: { httpMethod: 'POST', path: 'demo/summary', responseMode: 'responseNode', options: { allowedOrigins: ORIGIN } }, extra: { webhookId: sid('demo/summary') } },
-  sql('Make cache table', 'create table if not exists demo_summaries (key text primary key, body jsonb not null, created_at timestamptz not null default now())', null, 0, { alwaysOutputData: true }),
+  sql('Make cache table', 'create table if not exists demo_summaries (key text primary key, body jsonb not null, created_at timestamptz not null default now()); alter table demo_summaries enable row level security', null, 0, { alwaysOutputData: true }),
   sql('Latest report', "select (select json_build_object('runId', id, 'report', report) from demo_runs where status in ('done','partial') order by created_at desc limit 1) as latest", null, 0, { alwaysOutputData: true }),
   codeNode('Figures', [
     '/*@lib*/',

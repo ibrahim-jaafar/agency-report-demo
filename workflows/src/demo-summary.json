@@ -31,7 +31,7 @@
       ],
       "parameters": {
         "operation": "executeQuery",
-        "query": "create table if not exists demo_summaries (key text primary key, body jsonb not null, created_at timestamptz not null default now())",
+        "query": "create table if not exists demo_summaries (key text primary key, body jsonb not null, created_at timestamptz not null default now()); alter table demo_summaries enable row level security",
         "options": {}
       },
       "credentials": {
