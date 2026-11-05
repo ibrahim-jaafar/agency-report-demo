@@ -30,7 +30,7 @@ A marketing report built with n8n: leads from GoHighLevel, conversions sent to M
 2. **n8n (Render, free):** create a new Web Service from the existing image `docker.io/n8nio/n8n:2.43.8` in Frankfurt on the Free plan, and set the variables from `deploy/render.env.example`. You type the two secrets yourself; they never go in this repo.
 3. **Create the n8n owner account as soon as the service is live**, because until then anyone who opens the URL can claim it.
 4. **Free-plan limits:**
-   - The service sleeps after 15 minutes with no traffic and takes about a minute to wake up.
+   - The service sleeps after 15 minutes with no traffic and takes up to 4 minutes to wake up (measured: 3 min 45 s).
    - 750 free hours a month covers one service.
    - The GoHighLevel test account expires on 2027-04-19.
 

@@ -27,7 +27,7 @@ This guide is for the account manager who reads the report before it goes to a c
 ## What to try first
 
 1. **Run the report again** after a minute. Many failures are a service having a short outage.
-2. **The first visit of the day is slow.** The free server sleeps when unused and takes about a minute to wake up. The page says so while it waits; a summary asked for while it sleeps takes as long.
+2. **The first visit in a while is slow.** The free server sleeps after 15 minutes with no visitors and takes up to 4 minutes to wake up. The page says so while it waits; a summary asked for while it sleeps takes as long.
 3. **"Written by the template: the AI didn't answer (… 503)"** means Gemini was busy. Press "Ask Gemini again" a minute later.
 4. **Check the service status pages** if a step keeps failing:
    - GoHighLevel: https://status.gohighlevel.com
